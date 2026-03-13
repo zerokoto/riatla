@@ -2,7 +2,7 @@
   "type": "micro",
   "wake_word": "riatla",
   "author": "zerokoto",
-  "model": "https://raw.githubusercontent.com/zerokoto/riatla/main/riatla.tflite",
+  "model": "riatla.tflite",
   "trained_languages": ["es"],
   "version": 2,
   "micro": {
