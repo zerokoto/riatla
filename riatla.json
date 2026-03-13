@@ -1,9 +1,14 @@
 {
-  "type": "micro_wake_word_model",
+  "type": "micro",
   "wake_word": "riatla",
-  "files": [
-    {
-      "url": "https://github.com/zerokoto/riatla/blob/main/riatla.tflite"
-    }
-  ]
+  "author": "zerokoto",
+  "model": "https://raw.githubusercontent.com/zerokoto/riatla/main/riatla.tflite",
+  "trained_languages": ["es"],
+  "version": 2,
+  "micro": {
+    "probability_cutoff": 0.85,
+    "sliding_window_size": 5,
+    "feature_step_size": 10,
+    "tensor_arena_size": 22860
+  }
 }
