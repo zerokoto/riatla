@@ -1,0 +1,9 @@
+{
+  "type": "micro_wake_word_model",
+  "wake_word": "riatla",
+  "files": [
+    {
+      "url": "https://raw.githubusercontent.com/TU_USUARIO/TU_REPO/main/riatla.tflite"
+    }
+  ]
+}
