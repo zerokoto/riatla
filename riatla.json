@@ -3,7 +3,7 @@
   "wake_word": "riatla",
   "files": [
     {
-      "url": "https://raw.githubusercontent.com/TU_USUARIO/TU_REPO/main/riatla.tflite"
+      "url": "https://github.com/zerokoto/riatla/blob/main/riatla.tflite"
     }
   ]
 }
