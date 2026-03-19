@@ -1,247 +1,297 @@
 🚀 PRIMEROS PASOS CON RIATLA-APP
 ════════════════════════════════════════════════════════════════════════════
 
+IMPORTANTE: quickstart.bat SOLO instala dependencias, no arranca Electron.
+Debes ejecutar "npm start" manualmente después. Sigue esta guía paso a paso.
 
-⏱️  5 MINUTOS DE CONFIGURACIÓN
+════════════════════════════════════════════════════════════════════════════
+PASO 1: REQUISITOS PREVIOS
 ════════════════════════════════════════════════════════════════════════════
 
-PASO 1: Instalar Node.js (si no lo tienes)
-─────────────────────────────────────────────────────────────────────────
+Node.js v18 o superior (recomendado v20 LTS):
+  Descarga desde: https://nodejs.org  →  sección "LTS"
 
-Descargar e instalar desde: https://nodejs.org
-(Seleccionar versión LTS - Long Term Support)
+Verificar que está instalado correctamente:
+  Abre PowerShell y ejecuta:
+    node --version    → debe mostrar v18.x.x o superior
+    npm --version     → debe mostrar 9.x.x o superior
 
-Verificar instalación:
-  Windows: Abrir PowerShell
-  Escribir: node --version
-  Debe salir: v16.x.x (o superior)
-
-
-PASO 2: Descargar dependencias (2 minutos)
-─────────────────────────────────────────────────────────────────────────
-
-Opción A - RÁPIDO (Windows):
-  1. Ir a: riatla-app/
-  2. Doble-click en: quickstart.bat
-  3. Esperar a que termine
-
-Opción B - MANUAL:
-  1. Abrir PowerShell/Terminal
-  2. Navegar a: cd riatla-app
-  3. Escribir: npm install
-  4. Esperar a que descargue node_modules/
+  Si alguno de los dos falla → reinstalar Node.js y reiniciar PowerShell.
 
 
-PASO 3: Ejecutar la aplicación
-─────────────────────────────────────────────────────────────────────────
+════════════════════════════════════════════════════════════════════════════
+PASO 2: ABRIR POWERSHELL EN LA CARPETA CORRECTA
+════════════════════════════════════════════════════════════════════════════
 
-En la misma terminal (riatla-app/):
+Todos los comandos deben ejecutarse DESDE la carpeta riatla-app.
+
+Opción A (más fácil):
+  1. Abre el Explorador de archivos
+  2. Navega hasta la carpeta riatla-app/
+  3. Escribe "powershell" en la barra de dirección y pulsa Enter
+  → Se abre PowerShell ya posicionado en riatla-app/
+
+Opción B (manual):
+  1. Abre PowerShell
+  2. Navega a la carpeta:
+       cd "C:\ruta\hasta\riatla-app"
+  3. Verifica que estás en el lugar correcto:
+       Get-ChildItem
+       → Debes ver: package.json, main-log.js, index.html, renderer.js, models/
+
+
+════════════════════════════════════════════════════════════════════════════
+PASO 3: INSTALAR DEPENDENCIAS (solo la primera vez)
+════════════════════════════════════════════════════════════════════════════
+
+NOTA: quickstart.bat realiza este paso automáticamente, pero NO arranca la app.
+
+Desde PowerShell dentro de riatla-app/, ejecuta:
+
+  npm install
+
+Esto descarga ~300 MB en node_modules/ (tarda 1-3 minutos).
+
+Salida esperada al terminar:
+  added XXX packages ...
+  (sin líneas que digan "npm ERR!")
+
+Si aparece error de permisos o peer deps, usa:
+  npm install --legacy-peer-deps
+
+Verifica que la instalación fue correcta:
+  Test-Path .\node_modules\electron
+  → Debe devolver: True
+
+  Test-Path .\node_modules\three
+  → Debe devolver: True
+
+  Test-Path ".\node_modules\@pixiv\three-vrm"
+  → Debe devolver: True
+
+  Si alguno devuelve False → vuelve a ejecutar npm install
+
+
+════════════════════════════════════════════════════════════════════════════
+PASO 4: ARRANCAR ELECTRON (la app)
+════════════════════════════════════════════════════════════════════════════
+
+IMPORTANTE: Este paso es separado de quickstart.bat.
+Desde la misma PowerShell (en riatla-app/), ejecuta:
+
   npm start
 
-Esperado:
-  ✓ Se abre ventana de Electron
-  ✓ Ve fondo degradado morado/gris
-  ✓ Panel de debug en esquina superior izquierda
-  ✓ Indicador "WebSocket: Desconectado" (rojo) en esquina inferior derecha
+¿Qué ocurre al ejecutarlo?
+  1. PowerShell muestra:  "=== ELECTRON INICIANDO ==="
+  2. Aparece una ventana oscura de Electron
+  3. Se abre automáticamente el panel DevTools (consola)
+  4. En el fondo de la ventana verás: degradado morado/gris
+  5. Esquina inferior derecha: "WebSocket: Desconectado" (en rojo) ← NORMAL
+  6. Esquina superior izquierda: panel de debug
+
+Si la ventana se abre pero queda en negro unos segundos → es normal mientras
+carga el modelo VRM.
+
+Si ves en la consola DevTools:
+  "Failed to resolve module specifier"
+  → Significa que node_modules no se instaló bien. Sigue el paso 3B abajo.
 
 
-PASO 4: Cargar el avatar (automático)
-─────────────────────────────────────────────────────────────────────────
+════════════════════════════════════════════════════════════════════════════
+PASO 5: VERIFICAR QUE EL MODELO VRM CARGA
+════════════════════════════════════════════════════════════════════════════
 
-La app cargará automáticamente:
-  ✓ Ve logs: "Cargando VRM... 25%, 50%, 100%"
-  ✓ Cuando cargue: "✓ Modelo VRM cargado correctamente"
-  ✓ Avatar aparece en pantalla
+En el panel de debug (esquina superior izquierda de la app) debes ver:
+  "Cargando VRM... 25%"
+  "Cargando VRM... 50%"
+  "Cargando VRM... 100%"
+  "✓ Modelo VRM cargado correctamente"
+
+Y el avatar 3D aparecerá en pantalla.
+
+Si NO aparece el avatar:
+  1. Pulsa F12 para abrir DevTools (si no está ya abierto)
+  2. Ve a la pestaña "Console"
+  3. Busca errores en rojo
+  4. Verifica que el archivo existe:
+       Test-Path .\models\riatla.vrm
+       → Debe devolver: True
 
 
-PASO 5: Conectar riatla_daemon.py (en otra terminal)
-─────────────────────────────────────────────────────────────────────────
+════════════════════════════════════════════════════════════════════════════
+PASO 6: CONECTAR EL DAEMON PYTHON (en otra terminal)
+════════════════════════════════════════════════════════════════════════════
 
-En otra PowerShell/Terminal:
-  1. Navegar a: cd ..
-  2. Escribir: python riatla_daemon.py
-  3. Verás logs Starting MQTT/WebSocket
+Abre UNA NUEVA PowerShell (no cierres la anterior con Electron).
 
-En riatla-app:
-  ✓ Indicador cambia a verde: "WebSocket: Conectado"
-  ✓ Panel de debug muestra: "✓ WebSocket conectado"
+En la nueva terminal, navega a la carpeta PADRE (riatla/):
+  cd "..\riatla"         (si ya estabas en riatla-app/)
+  O navega directamente a donde está riatla_daemon.py
+
+Ejecuta el daemon:
+  python riatla_daemon.py
+
+Salida esperada en el daemon:
+  "Starting MQTT..."
+  "WebSocket server listening on port 8765"
+
+En la ventana de Electron:
+  ✓ El indicador cambia a VERDE: "WebSocket: Conectado"
+  ✓ Panel de debug: "✓ WebSocket conectado"
 
 
-¡LISTO! El sistema está funcionando
+¡LISTO! El sistema está completamente operativo.
 ════════════════════════════════════════════════════════════════════════════
 
 
-📝 PRUEBA DE FUNCIONALIDAD (10 segundos)
+📝 PRUEBA RÁPIDA (verificar que todo funciona)
 ════════════════════════════════════════════════════════════════════════════
 
-Abrir una TERCERA terminal y ejecutar:
+Abre UNA TERCERA PowerShell y ejecuta este script Python:
 
-Windows PowerShell:
-  Enter-PSSession localhost  # (puede no ser necesario)
-  $ws = New-WebSocket -Uri 'ws://localhost:8765'
-  $ws.send('{"accion":"emocion_happy"}')
+  Crea un archivo test.py con este contenido:
 
-O simplemente usar Python (más fácil):
+    import websocket, json
+    ws = websocket.create_connection('ws://localhost:8765')
+    ws.send(json.dumps({"accion": "emocion_happy"}))
+    ws.close()
+    print("Comando enviado OK")
 
-Crear archivo: test.py en riatla-app/
+  Ejecuta:
+    python test.py
 
-  import websocket
-  import json
-  
-  ws = websocket.create_connection('ws://localhost:8765')
-  ws.send(json.dumps({"accion":"emocion_happy"}))
-  ws.close()
-
-Ejecutar:
-  python test.py
-
-RESULTADO:
+RESULTADO ESPERADO:
   ✓ Avatar sonríe
   ✓ Panel de debug muestra: "Expresión: happy"
 
 
-🎮 COMANDOS BÁSICOS PARA PROBAR
+🎮 COMANDOS DISPONIBLES
 ════════════════════════════════════════════════════════════════════════════
 
-Happyness (Feliz):
-  {"accion":"emocion_happy"}
+  {"accion":"emocion_happy"}       → Feliz
+  {"accion":"emocion_sad"}         → Triste
+  {"accion":"emocion_surprised"}   → Sorprendido
+  {"accion":"emocion_angry"}       → Enojado
+  {"accion":"emocion_neutral"}     → Neutral
+  {"accion":"reset"}               → Reset total
 
-Sadness (Triste):
-  {"accion":"emocion_sad"}
-
-Surprise (Sorprendido):
-  {"accion":"emocion_surprised"}
-
-Angry (Enojado):
-  {"accion":"emocion_angry"}
-
-Neutral (Normal):
-  {"accion":"emocion_neutral"}
-
-Reset (Todo a default):
-  {"accion":"reset"}
-
-Look Up (Mirar arriba):
-  {"accion":"mirar","parametros":{"x":-0.3,"y":0,"z":0}}
-
-Look Left (Mirar izquierda):
-  {"accion":"mirar","parametros":{"x":0,"y":-0.3,"z":0}}
+  {"accion":"mirar","parametros":{"x":-0.3,"y":0,"z":0}}   → Mirar arriba
+  {"accion":"mirar","parametros":{"x":0,"y":-0.3,"z":0}}   → Mirar izquierda
 
 
 🔧 PROBLEMAS COMUNES Y SOLUCIONES
 ════════════════════════════════════════════════════════════════════════════
 
-❌ "Cannot find module 'electron'"
+─────────────────────────────────────────────────────────────────────────
+❌ PROBLEMA: "Failed to resolve module specifier '@pixiv/three-vrm'"
+   (aparece en DevTools Console al arrancar)
+─────────────────────────────────────────────────────────────────────────
+CAUSA: Las dependencias no se instalaron correctamente.
 ✅ SOLUCIÓN:
-   cd riatla-app
-   npm install
-   npm install --legacy-peer-deps
+   1. Cierra la app (Ctrl+C en la terminal de npm start)
+   2. Ejecuta en orden:
+        Remove-Item -Recurse -Force .\node_modules
+        Remove-Item -Force .\package-lock.json
+        npm install
+   3. Vuelve a ejecutar: npm start
 
-❌ "WebSocket sigue en rojo (desconectado)"
+─────────────────────────────────────────────────────────────────────────
+❌ PROBLEMA: "Cannot find module 'electron'" o la ventana no se abre
+─────────────────────────────────────────────────────────────────────────
+CAUSA: electron no se descargó en node_modules.
 ✅ SOLUCIÓN:
-   1. Verifica que riatla_daemon.py está ejecutándose
-   2. En terminal daemon, debe haber mensajes por segundo
-   3. Si no, ejecuta: python riatla_daemon.py
+   npm install --save-dev electron@latest --legacy-peer-deps
+   npm start
 
-❌ "Avatar no aparece, solo fondo"
+─────────────────────────────────────────────────────────────────────────
+❌ PROBLEMA: La terminal se cierra sola al hacer doble-click en quickstart.bat
+─────────────────────────────────────────────────────────────────────────
+CAUSA: quickstart.bat abre y cierra en su propia ventana. Eso es normal.
 ✅ SOLUCIÓN:
-   1. Ver panel de debug para errores
-   2. Abrir DevTools: F12
-   3. Ver pestaña Console para error específico
-   4. Verificar que riatla.vrm existe en models/
+   No uses doble-click. Abre PowerShell manualmente y ejecuta:
+     cd riatla-app
+     npm install
+     npm start
 
-❌ "npm install se queda pegado"
+─────────────────────────────────────────────────────────────────────────
+❌ PROBLEMA: "WebSocket: Desconectado" sigue en rojo después de npm start
+─────────────────────────────────────────────────────────────────────────
+CAUSA: riatla_daemon.py no está corriendo.
 ✅ SOLUCIÓN:
-   Presionar Ctrl+C
-   npm install --legacy-peer-deps --no-audit
+   En otra terminal (carpeta padre):
+     python riatla_daemon.py
 
-❌ "Expresión no cambia"
+─────────────────────────────────────────────────────────────────────────
+❌ PROBLEMA: Avatar no aparece (solo fondo morado vacío)
+─────────────────────────────────────────────────────────────────────────
 ✅ SOLUCIÓN:
-   1. Verificar que WebSocket muestra VERDE conectado
-   2. Verificar que VRM tiene los BlendShapes
-   3. Ver logs en DevTools (F12)
+   1. Pulsa F12 → pestaña Console → busca errores en rojo
+   2. Verifica que el archivo VRM existe:
+        Test-Path .\models\riatla.vrm
+   3. Si no existe, copia riatla.vrm a la carpeta models/
+
+─────────────────────────────────────────────────────────────────────────
+❌ PROBLEMA: npm install tarda mucho o se queda colgado
+─────────────────────────────────────────────────────────────────────────
+✅ SOLUCIÓN:
+   Ctrl+C para cancelar, luego:
+     npm install --legacy-peer-deps --no-audit --no-fund
+
+─────────────────────────────────────────────────────────────────────────
+❌ PROBLEMA: Error de permisos en PowerShell ("execution policy")
+─────────────────────────────────────────────────────────────────────────
+✅ SOLUCIÓN:
+   Abrir PowerShell como Administrador y ejecutar:
+     Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+   Luego vuelve a abrir PowerShell normal y ejecuta npm install / npm start.
 
 
-💻 MODO DESARROLLO (Con editor abierto)
+💻 MODO DESARROLLO (DevTools desde el inicio)
 ════════════════════════════════════════════════════════════════════════════
 
-Ejecutar con DevTools:
+Para arrancar con DevTools abierto desde el principio:
   npm run dev
 
-Te abre:
-  ✓ La app de Electron
-  ✓ DevTools (F12) con Console lista
+Para recargar la app sin cerrarla (tras editar renderer.js):
+  Pulsa Ctrl+R dentro de la ventana de Electron
 
-Modificar renderer.js:
-  Presiona Ctrl+R en riatla-app para recargar
-  (los cambios se reflejan al instante)
+
+📚 RESUMEN DE COMANDOS (referencia rápida)
+════════════════════════════════════════════════════════════════════════════
+
+  # Instalar dependencias (solo primera vez):
+  cd riatla-app
+  npm install
+
+  # Arrancar la app:
+  npm start
+
+  # Arrancar con DevTools:
+  npm run dev
+
+  # Si hay errores de módulos, reinstalar limpio:
+  Remove-Item -Recurse -Force .\node_modules
+  npm install
+
+  # En otra terminal - arrancar daemon:
+  cd ..\riatla
+  python riatla_daemon.py
 
 
 📚 DOCUMENTACIÓN COMPLETA
 ════════════════════════════════════════════════════════════════════════════
 
-Una vez todo funciona, lee estos archivos en orden:
-
-1. README.md 
-   → Visión general y características
-
-2. INTEGRATION.md
-   → Cómo conectar con riatla_daemon.py y Home Assistant
-
-3. CHECKLIST.md
-   → Verificación detallada de todos los pasos
-
-4. ESTRUCTURA.md
-   → Arquitectura técnica profunda
-
-
-🎯 PRÓXIMO PASO: INTEGRACIÓN CON DAEMON
-════════════════════════════════════════════════════════════════════════════
-
-Una vez que todo funciona:
-
-1. Abrir archivo: riatla_daemon.py (en carpeta padre)
-
-2. Modificar función set_emocion() para enviar a riatla-app
-
-3. Ejemplo de código:
-
-   def enviar_a_riatla_app(comando):
-       try:
-           ws = websocket.create_connection('ws://localhost:8765')
-           ws.send(json.dumps(comando))
-           ws.close()
-       except:
-           pass
-
-   # En set_emocion(), al final:
-   enviar_a_riatla_app({
-       "accion": f"emocion_{emocion}",
-       "parametros": {}
-   })
-
-4. Ver INTEGRATION.md para ejemplo completo
-
-
-🏆 META: CONECTAR HOME ASSISTANT
-════════════════════════════════════════════════════════════════════════════
-
-Una vez integrado con el daemon:
-
-1. Configurar Home Assistant MQTT
-2. Publicar a topic: riatla/emocion
-3. El daemon recibe y envía a riatla-app
-4. Avatar reacciona automáticamente
+  • README.md        → Visión general y características
+  • INTEGRATION.md   → Cómo conectar con riatla_daemon.py y Home Assistant
+  • CHECKLIST.md     → Verificación detallada de todos los pasos
+  • ESTRUCTURA.md    → Arquitectura técnica profunda
 
 
 ╔════════════════════════════════════════════════════════════════════════════╗
 ║                                                                            ║
-║              ¿PREGUNTAS? VER ARCHIVOS .md EN LA CARPETA                   ║
+║   SECUENCIA CORRECTA DE ARRANQUE (resumen):                               ║
 ║                                                                            ║
-║  • README.md           → Guía general                                      ║
-║  • CHECKLIST.md        → Verificación paso a paso                         ║
-║  • INTEGRATION.md      → Conectar con daemon                              ║
-║  • ESTRUCTURA.md       → Detalles técnicos                                ║
-║  • electron.py         → Notas del proyecto                               ║
+║   Terminal 1 (riatla-app/):   npm install   →   npm start                 ║
+║   Terminal 2 (riatla/):       python riatla_daemon.py                     ║
 ║                                                                            ║
 ╚════════════════════════════════════════════════════════════════════════════╝

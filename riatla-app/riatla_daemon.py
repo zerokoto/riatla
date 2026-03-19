@@ -24,7 +24,11 @@ MQTT_PORT     = 1883
 MQTT_USER     = "meshmqtt"
 MQTT_PASS     = "m3sq77"
 
-VNYAN_HOST    = "ws://localhost:8000/vnyan"
+VNYAN_HOST    = "ws://localhost:8000/vnyan" #No se usa ya vnyan, se conecta a localhost:8765 directamente a Three.js. No borrar por si acaso.
+
+WS_HOST       = "ws://127.0.0.1:8765"  # Escuchar solo en localhost (loopback)
+#WS_PORT       = 8765       # Puerto conocido por renderer.js
+
 
 TOPIC_EMOCION = "riatla/emocion"
 TOPIC_RESET   = "riatla/reset"
@@ -58,7 +62,7 @@ def vnyan_send(command: str):
             estado["vnyan_disponible"] = True
 
         ws = websocket.WebSocketApp(
-            VNYAN_HOST,
+            WS_HOST,
             on_open=on_open,
             on_error=on_error,
             on_close=on_close
@@ -66,8 +70,8 @@ def vnyan_send(command: str):
         ws.run_forever()
 
     except Exception as e:
-        print(f"[VNyan] No se pudo conectar: {e}")
-        estado["vnyan_disponible"] = False
+        print(f"[Electron] No se pudo conectar: {e}")
+        estado["Electron_disponible"] = False
 
 def set_emocion(emocion: str, duracion: int = None, mqtt_client=None):
     """Aplica una emoción al avatar con reset previo y timer opcional."""
@@ -165,7 +169,8 @@ def main():
     print("║       Riatla Daemon v0.1         ║")
     print("╚══════════════════════════════════╝")
     print(f"MQTT  → {MQTT_HOST}:{MQTT_PORT}")
-    print(f"VNyan → {VNYAN_HOST}\n")
+    #print(f"VNyan → {VNYAN_HOST}\n")
+    print(f"WS    → {WS_HOST}\n")
 
     client = mqtt.Client()
     client.username_pw_set(MQTT_USER, MQTT_PASS)

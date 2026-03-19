@@ -1,144 +1,214 @@
-# 🎭 Riatla App - Android Avatar Client
+# 🎭 Riatla App — Avatar Client
 
-Cliente **Electron** + **Three.js** + **VRM** que renderiza el avatar Riatla y recibe comandos de animación vía WebSocket desde el daemon Python.
+Cliente **Electron** + **Three.js** + **VRM** que renderiza el avatar Riatla y recibe comandos de animación desde el daemon Python vía WebSocket.
 
-## 📋 Estructura
+---
+
+## 🗺️ Flujo completo del sistema
+
+### Visión general
+
+```
+Home Assistant  ──MQTT──►  riatla_daemon.py  ──WebSocket──►  Riatla App (Electron)
+```
+
+### Flujo detallado
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│  HOME ASSISTANT                                                          │
+│  Publica en topic MQTT: riatla/emocion                                  │
+│  Payload: "happy" | "sad" | "neutral" | ...                             │
+└────────────────────────────┬────────────────────────────────────────────┘
+                             │ MQTT (broker mosquitto / HA interno)
+                             ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│  riatla_daemon.py   (proceso Python, carpeta padre)                     │
+│  ① Suscrito al topic MQTT                                               │
+│  ② Recibe el mensaje y construye comando JSON:                          │
+│       {"accion": "emocion_happy", "parametros": {}}                     │
+│  ③ Abre conexión WebSocket a ws://localhost:8765                        │
+│  ④ Envía el comando JSON                                                │
+└────────────────────────────┬────────────────────────────────────────────┘
+                             │ WebSocket (puerto 8765, JSON)
+                             ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│  ELECTRON — proceso principal   (main-log.js)                           │
+│  • Lanza BrowserWindow con index.html                                   │
+│  • Gestiona ciclo de vida de la app (ready / window-all-closed / quit)  │
+│  • Carga preload.js para aislar el renderer del proceso Node            │
+└────────────────────────────┬────────────────────────────────────────────┘
+                             │ carga
+                             ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│  RENDERER PROCESS   (index.html → renderer.js)                          │
+│                                                                          │
+│  ┌─── WebSocket client ──────────────────────────────────────────────┐  │
+│  │  connectWebSocket()                                                │  │
+│  │  ws.onmessage → JSON.parse → ejecutarComando(comando)             │  │
+│  └───────────────────────────────┬────────────────────────────────── ┘  │
+│                                  │                                       │
+│             ┌────────────────────┴──────────────────┐                   │
+│             ▼                                        ▼                   │
+│  ┌── Expresiones ──────────┐          ┌── Movimiento ──────────────┐    │
+│  │  activarExpresion(name) │          │  mirarHacia(x, y, z)       │    │
+│  │  VRM expressionManager  │          │  humanoid.getBoneNode(head) │    │
+│  │  BlendShapes del .vrm   │          │  bone.rotation.x/y/z       │    │
+│  └────────────┬────────────┘          └──────────────┬─────────────┘    │
+│               │                                      │                   │
+│               └──────────────┬───────────────────────┘                  │
+│                              ▼                                           │
+│  ┌── Three.js render loop ───────────────────────────────────────────┐  │
+│  │  animate() — requestAnimationFrame (60 FPS)                       │  │
+│  │  currentVRM.update(1/60)   ← actualiza física VRM (springs)       │  │
+│  │  renderer.render(scene, camera)  ← dibuja el frame                │  │
+│  └───────────────────────────────────────────────────────────────────┘  │
+│                                                                          │
+│  ┌── VRM Model ──────────────────────────────────────────────────────┐  │
+│  │  models/riatla.vrm  (cargado con GLTFLoader + VRMLoaderPlugin)    │  │
+│  │  • BlendShapes → expresiones faciales                             │  │
+│  │  • Humanoid bones → movimiento de cabeza / cuerpo                 │  │
+│  └───────────────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Comandos JSON que viajan por WebSocket
+
+| Campo `accion`       | Efecto en el avatar                     |
+|----------------------|-----------------------------------------|
+| `emocion_happy`      | BlendShape "happy" → 1.0                |
+| `emocion_sad`        | BlendShape "sad" → 1.0                  |
+| `emocion_angry`      | BlendShape "angry" → 1.0                |
+| `emocion_surprised`  | BlendShape "surprised" → 1.0            |
+| `emocion_neutral`    | Todas las expresiones → 0               |
+| `hablar`             | Alias de `emocion_happy`                |
+| `mirar`              | `parametros: {x, y, z}` → rotación bone head |
+| `reset`              | Expresión neutral + cabeza centrada     |
+
+---
+
+## 📋 Estructura del proyecto
 
 ```
 riatla-app/
-├── package.json          ← Dependencias npm
-├── electron-main.js      ← Proceso principal de Electron
-├── preload.js            ← Script de preload (seguridad)
-├── index.html            ← HTML principal
-├── renderer.js           ← Logic (THREE.js + VRM + WebSocket)
+├── package.json          ← Dependencias npm (main: main-log.js)
+├── main-log.js           ← Proceso principal Electron (crea BrowserWindow, logs)
+├── electron-main.js      ← Versión alternativa del main (sin logs a fichero)
+├── preload.js            ← Script de preload (aislamiento de contexto)
+├── index.html            ← HTML principal (importmap para three/@pixiv)
+├── renderer.js           ← Toda la lógica: Three.js + VRM + WebSocket + animaciones
+├── animations.js         ← Referencia/snippets de animaciones (no se carga en producción)
+├── websocket.js          ← Referencia/snippets de WebSocket (no se carga en producción)
 ├── models/
-│   └── riatla.vrm       ← Modelo VRM del avatar
-└── electron.py          ← Notas e instrucciones
+│   └── riatla.vrm        ← Modelo VRM del avatar (requerido)
+└── electron-log.txt      ← Log generado automáticamente por main-log.js
 ```
 
-## 🚀 Instalación
+> **Nota:** `renderer.js` concentra toda la lógica real (WebSocket, Three.js, VRM, animaciones).
+> `animations.js` y `websocket.js` son ficheros de referencia/documentación de código.
 
-```bash
-cd riatla-app
-npm install
-```
+---
+
+## 🚀 Instalación y arranque
 
 **Requisitos:**
-- Node.js 14+ 
-- npm o yarn
-- El daemon Python ejecutándose (`python ../riatla_daemon.py`)
-
-## ▶️ Ejecutar
+- Node.js 18 o superior (verificar: `node --version`)
+- El daemon Python ejecutándose en paralelo (`python riatla_daemon.py`)
 
 ```bash
-npm start        # Inicia la app
-npm run dev      # Con DevTools abierto
+# 1. Instalar dependencias (solo la primera vez)
+cd riatla-app
+npm install
+
+# 2. Arrancar la app
+npm start
+
+# Alternativa con DevTools abierto desde el inicio
+npm run dev
 ```
 
-## 🎮 Comandos WebSocket
+En Windows también puedes usar `quickstart.bat` que instala dependencias y arranca Electron.
 
-El app escucha en `ws://localhost:8765` los siguientes comandos JSON:
-
-### Expresiones
-
-```json
-{ "accion": "hablar" }           // = emocion_happy
-{ "accion": "emocion_happy" }  
-{ "accion": "emocion_sad" }    
-{ "accion": "emocion_angry" }   
-{ "accion": "emocion_surprised" }
-{ "accion": "emocion_relaxed" }
-{ "accion": "emocion_neutral" }  // = escuchar
-```
-
-### Movimientos
-
-```json
-{
-  "accion": "mirar",
-  "parametros": { "x": -0.2, "y": 0.1, "z": 0 }
-}
-```
-
-### Control
-
-```json
-{ "accion": "reset" }  // Vuelve a neutral y centra la cabeza
-```
+---
 
 ## ⚙️ Configuración
 
-### Puerto WebSocket
-
-**renderer.js** (línea 15):
+### Puerto WebSocket (`renderer.js`, línea 9)
 
 ```javascript
-const WEBSOCKET_URL = 'ws://localhost:8765'; // ← cambiar si es necesario
+const WEBSOCKET_URL = 'ws://localhost:8765'; // cambiar si el daemon usa otro puerto
 ```
 
-### Fullscreen
-
-**electron-main.js** (líneas 30-33):
+### Fullscreen / Kiosk (`main-log.js`)
 
 ```javascript
-// Descomenta para fullscreen
-// mainWindow.setFullScreen(true);
-// mainWindow.setKiosk(true);  // ESC para salir
+// Añadir dentro de createWindow(), tras mainWindow.loadFile():
+mainWindow.setFullScreen(true);   // fullscreen normal
+// mainWindow.setKiosk(true);     // kiosk (ESC no sale)
 ```
+
+---
 
 ## 🔧 Integración con riatla_daemon.py
 
-El daemon debe enviar comandos por WebSocket:
+Añadir en el daemon esta función para enviar comandos al avatar:
 
 ```python
-def enviar_comando(accion, parametros=None):
-    comando = {
-        "accion": accion,
-        "parametros": parametros or {}
-    }
-    # Enviar a ws://localhost:8765
-    ws.send(json.dumps(comando))
+import websocket, json
 
-# Ejemplos
-enviar_comando("hablar")
-enviar_comando("emocion_happy")
-enviar_comando("mirar", {"x": 0.3, "y": 0, "z": 0})
-enviar_comando("reset")
+def enviar_a_riatla_app(accion, parametros=None):
+    try:
+        ws = websocket.create_connection('ws://localhost:8765')
+        ws.send(json.dumps({"accion": accion, "parametros": parametros or {}}))
+        ws.close()
+    except Exception as e:
+        print(f"[riatla-app] Error enviando comando: {e}")
+
+# Uso en set_emocion():
+enviar_a_riatla_app("emocion_happy")
+enviar_a_riatla_app("mirar", {"x": -0.2, "y": 0.1, "z": 0})
+enviar_a_riatla_app("reset")
 ```
 
-## 🎨 Panel de Debug
+Ver `INTEGRATION.md` para el ejemplo completo con MQTT.
 
-Esquina superior-izquierda: último evento
-Esquina inferior-derecha: estado WebSocket
-
-## 📦 Dependencias Principales
-
-- **electron**: Framework de escritorio
-- **three**: Motor 3D
-- **@pixiv/three-vrm**: Loader y utils para modelos VRM
-
-## ⚠️ Notas
-
-- El modelo VRM debe estar en `models/riatla.vrm`
-- La app intenta reconectar automáticamente si pierde la conexión WebSocket
-- Los BlendShapes (expresiones) deben estar en el modelo VRM
-- Los huesos (bones) deben seguir el estándar VRM (head, chest, etc)
+---
 
 ## 🐛 Troubleshooting
 
-**Error: "Cannot find module 'three'"**
+**`Failed to resolve module specifier '@pixiv/three-vrm'`** (en DevTools Console)
 ```bash
+# Las dependencias no se instalaron bien. Reinstalar limpio:
+Remove-Item -Recurse -Force .\node_modules
 npm install
 ```
 
-**WebSocket desconecta cada 3 segundos**
-- Verifica que `riatla_daemon.py` está ejecutándose
-- Comprueba puerto 8765 no está bloqueado
+**Electron arranca y se cierra inmediatamente**
+```bash
+# El binario de electron no se descargó. Forzar descarga:
+node node_modules\electron\install.js
+```
 
-**Avatar no se ve**
-- Verifica ruta a `models/riatla.vrm`
-- Abre DevTools (F12) para ver errores
+**`Cannot find module 'electron'`**
+```bash
+npm install --save-dev electron@latest --legacy-peer-deps
+```
 
-**Expresiones no funcionan**
-- Comprueba que el VRM tiene BlendShapes en Mixamo/Unity
-- Revisa console para nombres de expresiones disponibles
+**WebSocket siempre en rojo (Desconectado)**
+- Verificar que `riatla_daemon.py` está ejecutándose en otra terminal
+- Comprobar que escucha en el puerto 8765: `netstat -ano | findstr 8765`
+
+**Avatar no aparece (solo fondo morado)**
+- Abrir DevTools (F12) → pestaña Console → buscar errores en rojo
+- Verificar que el fichero VRM existe: `Test-Path .\models\riatla.vrm`
+
+---
+
+## 📦 Dependencias principales
+
+| Paquete | Versión | Uso |
+|---|---|---|
+| `electron` | latest | Framework de escritorio (BrowserWindow, IPC) |
+| `three` | 0.137.0 | Motor 3D (escena, cámara, renderer WebGL) |
+| `@pixiv/three-vrm` | latest | Loader VRM, BlendShapes, humanoid bones |
+
