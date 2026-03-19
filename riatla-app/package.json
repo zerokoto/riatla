@@ -1,0 +1,43 @@
+{
+  "name": "riatla-app",
+  "version": "1.0.0",
+  "description": "Cliente Electron para avatar VRM Riatla con control vía WebSocket",
+  "author": "Riatla Team",
+  "main": "main-log.js",
+  "homepage": "./",
+  "scripts": {
+    "start": "electron .",
+    "dev": "NODE_ENV=development electron . --dev",
+    "build": "electron-builder",
+    "build:win": "electron-builder --win",
+    "build:mac": "electron-builder --mac",
+    "build:linux": "electron-builder --linux"
+  },
+  "devDependencies": {
+    "electron": "latest",
+    "electron-builder": "latest",
+    "electron-is-dev": "latest"
+  },
+  "dependencies": {
+    "three": "0.137.0",
+    "@pixiv/three-vrm": "latest"
+  },
+  "build": {
+    "appId": "com.riatla.app",
+    "productName": "Riatla Avatar",
+    "files": [
+      "electron-main.js",
+      "preload.js",
+      "index.html",
+      "renderer.js",
+      "models/**/*"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    }
+  }
+}
+
