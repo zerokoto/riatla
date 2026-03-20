@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
-
+import { KTX2Loader } from 'three/examples/jsm/loaders/KTX2Loader.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // CONFIGURACIÓN
@@ -49,8 +49,13 @@ function setupScene() {
     0.1,
     1000
   );
-  camera.position.set(3, 1.8, 6);
-  camera.lookAt(0, 1.2, 0);
+  //camera.position.set(3, 1.8, 6); // Posición para TinyRoom
+  //camera.lookAt(0, 1.2, 0); // Posición para TinyRoom
+  //camera.position.set(3, 1.8, 6);  // Posición para TatamiRoom
+  //camera.lookAt(0, 0.8, 0);  // Posición para TatamiRoom
+  camera.position.set(3, 1.8, 6);  // Posición para JapaneseRoom
+  camera.lookAt(0, 1.2, 0);  // Posición para JapaneseRoom
+
 
   // Renderer
   renderer = new THREE.WebGLRenderer({ 
@@ -146,8 +151,12 @@ function loadVRM() {
  * y lo centra en el origen. Elimina el escenario anterior si existía.
  * @param {string} path - Ruta relativa al archivo GLTF/GLB.
  */
-function loadWorld(path = './world/TinyRoom.gltf') {
+function loadWorld(path = './world/JapaneseRoom/scene.gltf') {
+  const ktx2Loader = new KTX2Loader()
+    .setTranscoderPath('three/examples/jsm/libs/basis/')
+    .detectSupport(renderer);
   const loader = new GLTFLoader();
+  loader.setKTX2Loader(ktx2Loader);
   loader.load(
     path,
     (gltf) => {
@@ -158,8 +167,15 @@ function loadWorld(path = './world/TinyRoom.gltf') {
       const size = box.getSize(new THREE.Vector3());
 
       // Escalar para que el eje mayor ocupe ~2.5 m (unidades VRM = metros)
-      const scale = 2.5 / Math.max(size.x, size.z);
+      //const scale = 2.5 / Math.max(size.x, size.z); // Escala para TinyRoom
+      //const scale = 40 / Math.max(size.x, size.z); // Escala para TatamiRoom
+      const scale = 4 / Math.max(size.x, size.z); // Escala para JapaneseRoom
+
       world.scale.setScalar(scale);
+
+      // Resetear posición y rotación antes de calcular el bounding box
+      world.position.set(0, 0, 0);
+      world.rotation.set(0, 0, 0);
 
       // Recentrar DESPUÉS de escalar
       box.setFromObject(world);
@@ -172,6 +188,10 @@ function loadWorld(path = './world/TinyRoom.gltf') {
         -scaledMin.y,
         -scaledCenter.z
       );
+
+      //world.rotation.y = 0; // Posicion para TinyRoom (mirando hacia la cámara)
+      //world.rotation.y = Math.PI; // Posicion para TatamiRoom (mirando hacia la cámara)
+      world.rotation.y = 0; // Posicion para JapaneseRoom (mirando hacia la cámara)
 
       scene.add(world);
       log(`✓ Escenario cargado (escala: ${scale.toFixed(3)}, size: ${size.x.toFixed(1)}x${size.y.toFixed(1)}x${size.z.toFixed(1)})`);
@@ -750,7 +770,7 @@ function gradosARadianes(grados) {
 function programarSiguienteMirada() {
   if (!miradaState.activa) return;
 
-  const espera = randomEntre(20000, 40000); // 20-40s mirando a un lado
+  const espera = randomEntre(10000, 20000); // 20-40s mirando a un lado
 
   miradaState.timer = setTimeout(() => {
     // Mover a posición random
@@ -759,7 +779,7 @@ function programarSiguienteMirada() {
     log(`Mirada → H:${Math.round(miradaState.targetY * 180 / Math.PI)}° V:${Math.round(miradaState.targetX * 180 / Math.PI)}°`);
 
     // Después de la espera, volver al centro
-    const esperaCentro = randomEntre(1000, 5000); // 1-5s en el centro
+    const esperaCentro = randomEntre(10000, 15000); // 1-5s en el centro
     miradaState.timer = setTimeout(() => {
       miradaState.targetX = 0;
       miradaState.targetY = 0;
