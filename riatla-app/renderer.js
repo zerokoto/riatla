@@ -118,6 +118,8 @@ function loadVRM() {
       scene.add(vrm.scene);
       vrm.scene.rotation.y = Math.PI / 7;
       aplicarPoseReposo(vrm);
+      animacion_mirardespreocupada(true);
+      animacion_parpadeo(true);
       vrmLoaded = true;
       
       // Eliminar T pose para que se vea mas natural al cargar
@@ -254,6 +256,163 @@ function activarExpresion(nombre) {
   }
 }
 
+
+// ── Estado de expresiones complejas ───────────────────────────────────────
+const expresionState = {
+  actual: 'neutral',
+  timerReset: null,
+  lerpActivo: {},   // huesos en transición: { nombreHueso: {from, to, progress} }
+  lerpRAF: null
+};
+
+// ── Lerp suave para huesos ─────────────────────────────────────────────────
+
+function lerpHueso(vrm, nombreHueso, targetRotation, duracionMs = 800) {
+  const hueso = vrm.humanoid.getNormalizedBoneNode(nombreHueso);
+  if (!hueso) return;
+
+  expresionState.lerpActivo[nombreHueso] = {
+    from: {
+      x: hueso.rotation.x,
+      y: hueso.rotation.y,
+      z: hueso.rotation.z
+    },
+    to: targetRotation,
+    progress: 0,
+    duracion: duracionMs
+  };
+}
+
+function tickLerpHuesos() {
+  if (!currentVRM) return;
+  const activos = expresionState.lerpActivo;
+  let hayActivos = false;
+
+  for (const [nombreHueso, lerp] of Object.entries(activos)) {
+    const hueso = currentVRM.humanoid.getNormalizedBoneNode(nombreHueso);
+    if (!hueso) continue;
+
+    lerp.progress = Math.min(lerp.progress + (16 / lerp.duracion), 1.0);
+    // easeInOut para movimiento natural
+    const t = lerp.progress < 0.5
+      ? 2 * lerp.progress * lerp.progress
+      : 1 - Math.pow(-2 * lerp.progress + 2, 2) / 2;
+
+    hueso.rotation.x = lerp.from.x + (lerp.to.x - lerp.from.x) * t;
+    hueso.rotation.y = lerp.from.y + (lerp.to.y - lerp.from.y) * t;
+    hueso.rotation.z = lerp.from.z + (lerp.to.z - lerp.from.z) * t;
+
+    if (lerp.progress < 1.0) hayActivos = true;
+    else delete activos[nombreHueso];
+  }
+
+  if (hayActivos) {
+    expresionState.lerpRAF = requestAnimationFrame(tickLerpHuesos);
+  }
+}
+
+function iniciarLerp() {
+  if (expresionState.lerpRAF) cancelAnimationFrame(expresionState.lerpRAF);
+  expresionState.lerpRAF = requestAnimationFrame(tickLerpHuesos);
+}
+
+// ── Pose neutral (brazos en reposo) ───────────────────────────────────────
+
+function poseNeutral(vrm) {
+  lerpHueso(vrm, 'leftUpperArm',  { x: 0, y: 0, z: -1.2 });
+  lerpHueso(vrm, 'rightUpperArm', { x: 0, y: 0, z:  1.2 });
+  lerpHueso(vrm, 'leftLowerArm',  { x: 0, y: 0, z: -0.2 });
+  lerpHueso(vrm, 'rightLowerArm', { x: 0, y: 0, z:  0.2 });
+  lerpHueso(vrm, 'head',          { x: 0, y: 0, z:  0   });
+  lerpHueso(vrm, 'neck',          { x: 0, y: 0, z:  0   });
+  iniciarLerp();
+}
+
+// ── Pose angry ─────────────────────────────────────────────────────────────
+
+function poseAngry(vrm) {
+  // Lado random: izquierda o derecha
+  const lado = Math.random() < 0.5 ? 1 : -1;
+
+  // Brazos cruzados
+  // Brazo derecho encima, brazo izquierdo debajo (clásico cruce)
+  lerpHueso(vrm, 'rightUpperArm', { x:  0.3, y: -0.2, z:  0.8 });
+  lerpHueso(vrm, 'rightLowerArm', { x:  0.0, y: -1.2, z:  0.3 });
+  lerpHueso(vrm, 'leftUpperArm',  { x:  0.3, y:  0.2, z: -0.8 });
+  lerpHueso(vrm, 'leftLowerArm',  { x:  0.0, y:  1.2, z: -0.3 });
+
+  // Cabeza girada y levantada al lado random
+  // pero los ojos compensan mirando a cámara (via lookAt del expressionManager)
+  lerpHueso(vrm, 'neck', {
+    x: -0.15,                          // levantada (barbilla arriba)
+    y:  lado * 0.3,                    // girada al lado random
+    z:  lado * 0.05                    // leve inclinación
+  });
+  lerpHueso(vrm, 'head', {
+    x: -0.1,
+    y:  lado * 0.25,
+    z:  lado * 0.05
+  });
+
+  // Ojos compensan la rotación de la cabeza mirando a cámara
+  if (vrm.expressionManager) {
+    // Mover los ojos en dirección contraria al giro de la cabeza
+    miradaState.targetY = -lado * 0.2;
+    miradaState.targetX =  0.1;        // ligeramente arriba (mirada altiva)
+  }
+
+  iniciarLerp();
+}
+
+// ── Activar expresión angry completa ──────────────────────────────────────
+
+function activarAngry(duracionSegundos = 10) {
+  if (!currentVRM) return;
+
+  // Cancelar reset anterior si existe
+  if (expresionState.timerReset) {
+    clearTimeout(expresionState.timerReset);
+    expresionState.timerReset = null;
+  }
+
+  // Pausar mirada despreocupada
+  miradaState.activo = false;
+
+  // Expresión facial
+  activarExpresion('angry');
+
+  // Pose corporal con transición suave
+  poseAngry(currentVRM);
+
+  expresionState.actual = 'angry';
+  log(`Expresión: angry (${duracionSegundos}s)`);
+
+  // Reset automático
+  expresionState.timerReset = setTimeout(() => {
+    desactivarAngry();
+  }, duracionSegundos * 1000);
+}
+
+function desactivarAngry() {
+  if (!currentVRM) return;
+
+  // Volver expresión facial a neutral
+  activarExpresion('neutral');
+
+  // Volver pose corporal a reposo
+  poseNeutral(currentVRM);
+
+  // Centrar mirada y reactivar animación
+  miradaState.targetX = 0;
+  miradaState.targetY = 0;
+  miradaState.activo = true;
+  programarSiguienteMirada();
+
+  expresionState.actual = 'neutral';
+  log('Expresión: neutral (desde angry)');
+}
+
+
 function mirarHacia(x, y, z) {
   if (!currentVRM || !currentVRM.humanoid) return;
   
@@ -274,6 +433,7 @@ function animate() {
   if (currentVRM) {
     currentVRM.update(1 / 60); // 60 FPS
     animarRespiracion();
+    animarMirada();
   }
   
   renderer.render(scene, camera);
@@ -306,6 +466,181 @@ function animarRespiracion() {
   if (leftShoulder)  leftShoulder.rotation.z = -breath * 0.5;
   if (rightShoulder) rightShoulder.rotation.z =  breath * 0.5;
 }
+
+// ── Estado de la animación ─────────────────────────────────────────────────
+const miradaState = {
+  activa: false,
+  targetX: 0,      // objetivo arriba/abajo
+  targetY: 0,      // objetivo izquierda/derecha
+  currentX: 0,     // posición actual interpolada
+  currentY: 0,
+  timer: null
+};
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+function randomEntre(min, max) {
+  return Math.random() * (max - min) + min;
+}
+
+function randomGrados(maxGrados) {
+  // Positivo o negativo, sin superar maxGrados
+  const grados = randomEntre(5, maxGrados);
+  return Math.random() < 0.5 ? grados : -grados;
+}
+
+function gradosARadianes(grados) {
+  return grados * (Math.PI / 180);
+}
+
+// ── Animación ──────────────────────────────────────────────────────────────
+
+function programarSiguienteMirada() {
+  if (!miradaState.activa) return;
+
+  const espera = randomEntre(20000, 40000); // 20-40s mirando a un lado
+
+  miradaState.timer = setTimeout(() => {
+    // Mover a posición random
+    miradaState.targetY = gradosARadianes(randomGrados(35));
+    miradaState.targetX = gradosARadianes(randomGrados(20));
+    log(`Mirada → H:${Math.round(miradaState.targetY * 180 / Math.PI)}° V:${Math.round(miradaState.targetX * 180 / Math.PI)}°`);
+
+    // Después de la espera, volver al centro
+    const esperaCentro = randomEntre(5000, 10000); // 5-10s en el centro
+    miradaState.timer = setTimeout(() => {
+      miradaState.targetX = 0;
+      miradaState.targetY = 0;
+      log('Mirada → centro');
+
+      // Una vez en el centro, programar el siguiente giro
+      programarSiguienteMirada();
+    }, esperaCentro);
+
+  }, espera);
+}
+
+function animacion_mirardespreocupada(activar = true) {
+  miradaState.activa = activar;
+
+  if (!activar) {
+    // Detener — limpiar timer y volver al centro suavemente
+    if (miradaState.timer) clearTimeout(miradaState.timer);
+    miradaState.targetX = 0;
+    miradaState.targetY = 0;
+    log('Mirada despreocupada desactivada');
+    return;
+  }
+
+  log('Mirada despreocupada activada');
+  programarSiguienteMirada();
+}
+
+// ── En animate() — interpolar suavemente hacia el objetivo ─────────────────
+// Llama esto dentro de animate(), igual que animarRespiracion()
+
+function animarMirada() {
+  if (!currentVRM) return;
+
+  const head = currentVRM.humanoid.getNormalizedBoneNode('head');
+  if (!head) return;
+
+  // Lerp suave hacia el objetivo (0.02 = lento y natural)
+  miradaState.currentX += (miradaState.targetX - miradaState.currentX) * 0.02;
+  miradaState.currentY += (miradaState.targetY - miradaState.currentY) * 0.02;
+
+  head.rotation.x = miradaState.currentX;
+  head.rotation.y = miradaState.currentY;
+}
+
+
+
+// ── Estado del parpadeo ────────────────────────────────────────────────────
+const parpadeoState = {
+  activo: true,
+  timer: null
+};
+
+function programarSiguienteParpadeo() {
+  if (!parpadeoState.activo) return;
+
+  // Parpadeo cada 4-8 segundos (humano real: 3-5s)
+  const espera = randomEntre(4000, 8000);
+
+  parpadeoState.timer = setTimeout(async () => {
+    await ejecutarParpadeo();
+    programarSiguienteParpadeo();
+  }, espera);
+}
+
+async function ejecutarParpadeo() {
+  if (!currentVRM?.expressionManager) return;
+  const exp = currentVRM.expressionManager;
+
+  // A veces parpadea doble (como los humanos)
+  const doble = Math.random() < 0.15;
+
+  await cerrarOjos(exp);
+
+  if (doble) {
+    await abrirOjos(exp);
+    await esperar(80);
+    await cerrarOjos(exp);
+  }
+
+  await abrirOjos(exp);
+}
+
+function cerrarOjos(exp) {
+  return new Promise(resolve => {
+    let v = 0;
+    const intervalo = setInterval(() => {
+      v = Math.min(v + 0.25, 1.0);  // ← velocidad cierre
+      try { exp.setValue('blink', v); } catch(e) {}
+      if (v >= 1.0) {
+        clearInterval(intervalo);
+        resolve();
+      }
+    }, 16); // ~60fps
+  });
+}
+
+function abrirOjos(exp) {
+  return new Promise(resolve => {
+    let v = 1.0;
+    const intervalo = setInterval(() => {
+      v = Math.max(v - 0.22, 0);    // ← velocidad apertura (más lento que el cierre)
+      try { exp.setValue('blink', v); } catch(e) {}
+      if (v <= 0) {
+        clearInterval(intervalo);
+        resolve();
+      }
+    }, 16);
+  });
+}
+
+function esperar(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function animacion_parpadeo(activar = true) {
+  parpadeoState.activo = activar;
+
+  if (!activar) {
+    if (parpadeoState.timer) clearTimeout(parpadeoState.timer);
+    if (currentVRM?.expressionManager) {
+      try { currentVRM.expressionManager.setValue('blink', 0); } catch(e) {}
+    }
+    log('Parpadeo desactivado');
+    return;
+  }
+
+  log('Parpadeo activado');
+  programarSiguienteParpadeo();
+}
+
+
+
 
 
 
@@ -359,6 +694,7 @@ function connectWebSocket() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 function ejecutarComando(comando) {
+  console.log('Comando recibido:', JSON.stringify(comando)); // ← añadir
   const { accion, parametros = {} } = comando;
   
   state.ultimoComando = accion;
@@ -380,6 +716,7 @@ function ejecutarComando(comando) {
       break;
       
     case 'emocion_angry':
+      const duracion = parametros.duracion ?? 20;
       activarExpresion('angry');
       break;
       
@@ -399,6 +736,14 @@ function ejecutarComando(comando) {
       const { x = 0, y = 0, z = 0 } = parametros;
       mirarHacia(x, y, z);
       log(`Mirando hacia: (${x}, ${y}, ${z})`);
+      break;
+
+    case 'mirada_despreocupada':
+      animacion_mirardespreocupada(parametros.activa ?? true);
+      break;
+
+    case 'parpadeo':
+      animacion_parpadeo(parametros.activa ?? true);
       break;
       
     case 'reset':
