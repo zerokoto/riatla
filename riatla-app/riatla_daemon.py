@@ -22,6 +22,7 @@ Topics MQTT de entrada
   riatla/reset     →  cualquier payload → vuelve a neutral
   riatla/world     →  ruta relativa del GLB/GLTF  (ej: "./world/Attic.vnworld")
   riatla/world/luz →  "on" | "off"  → enciende/apaga la iluminación
+  riatla/world/musica → "on" | "off"  → activa/desactiva animación de baile sutil
 
 Topics MQTT de salida (publicados por el daemon)
 ─────────────────────────────────────────────────
@@ -57,6 +58,7 @@ TOPIC_RESET      = "riatla/reset"
 TOPIC_ESTADO     = "riatla/estado"
 TOPIC_WORLD      = "riatla/world"
 TOPIC_WORLD_LUZ  = "riatla/world/luz"
+TOPIC_WORLD_MUSICA = "riatla/world/musica"
 TOPIC_WORLD_ALL  = "riatla/world/#"   # agrupa TOPIC_WORLD y todos sus subtopics
 
 # Deben coincidir exactamente con los case de ejecutarComando() en renderer.js
@@ -275,6 +277,16 @@ def on_message(client, userdata, msg):
     if topic == TOPIC_WORLD_LUZ:
         set_world_luz(payload_raw)
 
+    if topic == TOPIC_WORLD_MUSICA:
+        try:
+            data          = json.loads(payload_raw)
+            estado_musica = data.get("estado", payload_raw)
+            modo_musica   = data.get("modo", "normal")
+        except json.JSONDecodeError:
+            estado_musica = payload_raw   # acepta texto plano: "on" / "off"
+            modo_musica   = "normal"
+        set_world_musica(estado_musica, modo_musica)
+
 def set_world(path: str, mqtt_client=None):
     """
     Cambia el escenario 3D enviando la ruta del archivo al renderer.
@@ -301,6 +313,27 @@ def set_world_luz(estado_luz: str):
         return
     enviar_comando("world_luz", {"estado": estado_luz})
     print(f"[Riatla] Iluminación → {estado_luz}")
+
+def set_world_musica(estado_musica: str, modo: str = 'normal'):
+    """
+    Activa o desactiva la animación de baile sutil del avatar.
+    Args:
+        estado_musica: "on" | "off" (case-insensitive).
+        modo:          "normal" | "metal" (default: "normal").
+    """
+    estado_musica = estado_musica.lower().strip()
+    modo          = modo.lower().strip()
+    if estado_musica not in ("on", "off"):
+        print(f"[Riatla] world/musica: valor desconocido '{estado_musica}' — usar 'on' u 'off'")
+        return
+    if modo not in ("normal", "metal"):
+        print(f"[Riatla] world/musica: modo desconocido '{modo}' — usar 'normal' o 'metal'")
+        modo = 'normal'
+    params = {"estado": estado_musica}
+    if estado_musica == "on":
+        params["modo"] = modo
+    enviar_comando("world_musica", params)
+    print(f"[Riatla] Música → {estado_musica}" + (f" ({modo})" if estado_musica == "on" else ""))
 
 
 

@@ -346,6 +346,8 @@ function poseNeutral(vrm) {
   lerpHueso(vrm, 'rightUpperArm', { x: 0, y: 0, z:  1.2 });
   lerpHueso(vrm, 'leftLowerArm',  { x: 0, y: 0, z: -0.2 });
   lerpHueso(vrm, 'rightLowerArm', { x: 0, y: 0, z:  0.2 });
+  lerpHueso(vrm, 'leftHand',      { x: 0, y: 0, z:  0   });
+  lerpHueso(vrm, 'rightHand',     { x: 0, y: 0, z:  0   });
   lerpHueso(vrm, 'head',          { x: 0, y: 0, z:  0   });
   lerpHueso(vrm, 'neck',          { x: 0, y: 0, z:  0   });
   iniciarLerp();
@@ -672,6 +674,7 @@ function animate() {
     currentVRM.update(1 / 60);
     animarRespiracion();
     animarMirada();
+    animarMusica();
   }
   
   renderer.render(scene, camera);
@@ -895,6 +898,171 @@ function animacion_parpadeo(activar = true) {
 
 
 // ═══════════════════════════════════════════════════════════════════════════
+// ANIMACIÓN — MÚSICA / BAILE SUTIL
+// Balanceo corporal idle cuando hay música activa.
+// Simula el movimiento involuntario de alguien esperando en la barra de una
+// disco: sway lateral de cintura, rebote contralateral de brazos y muñecas,
+// cabezeo suave al ritmo. No toca los ejes gestionados por animarRespiracion
+// (.x de spine/chest) ni por animarMirada (.x/.y de head).
+// Al desactivar, los huesos vuelven a pose de reposo con lerp suave.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const musicaState = {
+  activa:     false,
+  tiempo:     0,
+  intensidad: 0,      // 0 = parado, 1 = baile completo — se interpola en cada frame
+  fadeDir:    0,      // +1 = fade-in, -1 = fade-out, 0 = estable
+  modo:       'normal', // 'normal' | 'metal'
+  // Seeds de aleatoriedad: regenerados en cada activación para que cada
+  // sesión de baile sea diferente. Frecuencias irracionales entre sí para
+  // evitar ciclos perceptibles en cualquier ventana de tiempo razonable.
+  r1: 0, r2: 0, r3: 0
+};
+
+const MUSICA_FADE_SPEED = 0.015; // ~1.1 s a 60 FPS para ir de 0 a 1
+
+/**
+ * Animación de baile sutil: sway lateral del cuerpo + rebote de brazos y muñecas.
+ * - La intensidad sube/baja suavemente según fadeDir (transición entrada/salida).
+ * - Tres moduladores lentos con frecuencias irracionales rompen la periodicidad.
+ * - Las seeds se regeneran en cada activación para variedad entre sesiones.
+ * Llamada cada frame en animate().
+ */
+function animarMusica() {
+  if (!currentVRM) return;
+  if (!musicaState.activa && musicaState.intensidad <= 0) return;
+
+  const { humanoid } = currentVRM;
+
+  // ── Fade in / fade out ────────────────────────────────────────────────────
+  if (musicaState.fadeDir !== 0) {
+    musicaState.intensidad = Math.max(0, Math.min(1,
+      musicaState.intensidad + musicaState.fadeDir * MUSICA_FADE_SPEED
+    ));
+
+    if (musicaState.fadeDir === -1 && musicaState.intensidad <= 0) {
+      // Fade-out completado → limpiar huesos y detener del todo
+      musicaState.fadeDir = 0;
+      ['hips', 'spine', 'chest'].forEach(nombre => {
+        const hueso = humanoid.getNormalizedBoneNode(nombre);
+        if (hueso) hueso.rotation.z = 0;
+      });
+      poseNeutral(currentVRM);
+      return;
+    }
+    if (musicaState.fadeDir === 1 && musicaState.intensidad >= 1) {
+      musicaState.fadeDir = 0;
+    }
+  }
+
+  const amp = musicaState.intensidad;
+  if (amp <= 0) return;
+
+  // Metal: tempo ligeramente más rápido (≈ 110 BPM base vs ≈ 70 BPM normal)
+  const tickSpeed = musicaState.modo === 'metal' ? 0.09 : 0.06;
+  musicaState.tiempo += tickSpeed;
+  const t  = musicaState.tiempo;
+  const { r1, r2, r3 } = musicaState;
+
+  // ── Moduladores de aleatoriedad ───────────────────────────────────────────
+  // Frecuencias primas entre sí → periodo de repetición > 30 minutos reales
+  const mod1 = 0.65 + 0.35 * Math.sin(t * 0.031 + r1); // modula amplitud brazos
+  const mod2 = 0.65 + 0.35 * Math.sin(t * 0.017 + r2); // modula amplitud antebrazos y cuello
+  const mod3 = 0.90 + 0.10 * Math.sin(t * 0.023 + r3); // modula la frecuencia base del sway
+
+  // ── Caderas y columna: sway en S ──────────────────────────────────────────
+  const hips = humanoid.getNormalizedBoneNode('hips');
+  if (hips)  hips.rotation.z  =  Math.sin(t * mod3)        * 0.02  * amp;
+
+  const spine = humanoid.getNormalizedBoneNode('spine');
+  if (spine) spine.rotation.z = -Math.sin(t * mod3)        * 0.025 * amp;
+  // spine.rotation.x → animarRespiracion
+
+  const chest = humanoid.getNormalizedBoneNode('chest');
+  if (chest) chest.rotation.z = -Math.sin(t * mod3 + 0.4)  * 0.02  * amp;
+  // chest.rotation.x → animarRespiracion
+
+  // ── Brazos superiores: movimiento sutil contralateral ────────────────────
+  const leftArm  = humanoid.getNormalizedBoneNode('leftUpperArm');
+  const rightArm = humanoid.getNormalizedBoneNode('rightUpperArm');
+  if (leftArm) {
+    leftArm.rotation.z = -1.2 + Math.sin(t + Math.PI) * 0.03  * mod1 * amp;
+    leftArm.rotation.x =        Math.sin(t * 2 + 1.0) * 0.015 * mod2 * amp;
+  }
+  if (rightArm) {
+    rightArm.rotation.z = 1.2 - Math.sin(t + Math.PI) * 0.03  * mod1 * amp;
+    rightArm.rotation.x =       Math.sin(t * 2)        * 0.015 * mod2 * amp;
+  }
+
+  // ── Antebrazos: demora de fase ────────────────────────────────────────────
+  const leftLower  = humanoid.getNormalizedBoneNode('leftLowerArm');
+  const rightLower = humanoid.getNormalizedBoneNode('rightLowerArm');
+  if (leftLower)  leftLower.rotation.z  = -0.2 + Math.sin(t * 1.5 + 0.5) * 0.02 * mod2 * amp;
+  if (rightLower) rightLower.rotation.z =  0.2 - Math.sin(t * 1.5 + 0.5) * 0.02 * mod2 * amp;
+
+  // ── Muñecas: al doble de frecuencia, fase aleatoria ──────────────────────
+  const leftHand  = humanoid.getNormalizedBoneNode('leftHand');
+  const rightHand = humanoid.getNormalizedBoneNode('rightHand');
+  if (leftHand) {
+    leftHand.rotation.z = Math.sin(t * 2 + 1.2 + r1)    * 0.03 * mod1 * amp;
+    leftHand.rotation.x = Math.sin(t * 1.4 + r2)        * 0.02 * mod2 * amp;
+  }
+  if (rightHand) {
+    rightHand.rotation.z = Math.sin(t * 2 + r2)         * 0.03 * mod1 * amp;
+    rightHand.rotation.x = Math.sin(t * 1.4 + 0.8 + r3) * 0.02 * mod2 * amp;
+  }
+
+  // ── Cuello: cabezeo; head.rotation.x/.y → animarMirada ───────────────────
+  const neck = humanoid.getNormalizedBoneNode('neck');
+  if (neck) {
+    neck.rotation.z = -Math.sin(t + 0.6)      * 0.025 * mod3 * amp;
+    neck.rotation.y =  Math.sin(t * 0.5 + r2) * 0.03  * mod1 * amp;
+    neck.rotation.x =  Math.abs(Math.sin(t))  * 0.02  * mod2 * amp;
+  }
+
+  // ── Heavy metal: headbang dominante ──────────────────────────────────────
+  // Perfil asimétrico: Math.pow(max(0,sin),0.6) pasa rápido por el punto alto
+  // (cabeza erguida) y baja lentamente hacia adelante — motion de headbang real.
+  // Se ejecuta DESPUÉS de animarMirada (order en animate()), por lo que
+  // sobreescribe head.rotation.x con seguridad.
+  if (musicaState.modo === 'metal') {
+    const head = humanoid.getNormalizedBoneNode('head');
+    const bang  = Math.pow(Math.max(0, Math.sin(t * 1.5)), 0.85);
+    if (head) {
+      head.rotation.x = (0.02 + bang * 0.08) * amp;  // 0.02 reposo → 0.16 nod máximo
+      head.rotation.y = miradaState.currentY;          // preservar giro lateral de mirada
+    }
+    if (neck) {
+      neck.rotation.x = (0.015 + bang * 0.04) * amp;  // cuello acompaña el cabezazo
+    }
+  }
+}
+
+/**
+ * Activa o desactiva la animación de baile sutil con fade gradual.
+ * Al activar, regenera las seeds de aleatoriedad para que la sesión sea única.
+ * Al desactivar, el fade-out termina de forma natural en animarMusica().
+ * @param {boolean} activar
+ * @param {'normal'|'metal'} modo - Estilo de baile (default: 'normal').
+ */
+function animacion_musica(activar = true, modo = 'normal') {
+  if (activar) {
+    musicaState.r1      = Math.random() * Math.PI * 2;
+    musicaState.r2      = Math.random() * Math.PI * 2;
+    musicaState.r3      = Math.random() * Math.PI * 2;
+    musicaState.modo    = modo;
+    musicaState.activa  = true;
+    musicaState.fadeDir = 1;
+    log(`Música activada (${modo})`);
+  } else {
+    musicaState.activa  = false;
+    musicaState.fadeDir = -1;
+    log('Música desactivada');
+  }
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
 // WEBSOCKET
 // Conexión al daemon Python. Reconexión automática cada 3 s si se pierde.
 // El renderer solo recibe comandos; nunca envía datos al daemon.
@@ -962,6 +1130,7 @@ function connectWebSocket() {
 //   world                  → carga escenario desde parametros.path
 //   world_rotation         → rota el escenario parametros.y radianes
 //   world_luz              → iluminación on/off (parametros.estado: 'on' | 'off')
+//   world_musica           → baile sutil on/off (parametros.estado: 'on' | 'off')
 // ═══════════════════════════════════════════════════════════════════════════
 
 function ejecutarComando(comando) {
@@ -1047,6 +1216,10 @@ function ejecutarComando(comando) {
       log(`Iluminación: ${parametros.estado}`);
       break;
     }
+
+    case 'world_musica':
+      animacion_musica(parametros.estado === 'on', parametros.modo ?? 'normal');
+      break;
       
     default:
       log(`⚠ Acción desconocida: ${accion}`);
