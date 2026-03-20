@@ -21,6 +21,7 @@ Topics MQTT de entrada
                       "happy"   ← texto plano también aceptado
   riatla/reset     →  cualquier payload → vuelve a neutral
   riatla/world     →  ruta relativa del GLB/GLTF  (ej: "./world/Attic.vnworld")
+  riatla/world/luz →  "on" | "off"  → enciende/apaga la iluminación
 
 Topics MQTT de salida (publicados por el daemon)
 ─────────────────────────────────────────────────
@@ -51,10 +52,12 @@ MQTT_PASS = "m3sq77"
 WS_HOST = "localhost"
 WS_PORT = 8765  # debe coincidir con WEBSOCKET_URL en renderer.js
 
-TOPIC_EMOCION = "riatla/emocion"
-TOPIC_RESET   = "riatla/reset"
-TOPIC_ESTADO  = "riatla/estado"
-TOPIC_WORLD   = "riatla/world"
+TOPIC_EMOCION    = "riatla/emocion"
+TOPIC_RESET      = "riatla/reset"
+TOPIC_ESTADO     = "riatla/estado"
+TOPIC_WORLD      = "riatla/world"
+TOPIC_WORLD_LUZ  = "riatla/world/luz"
+TOPIC_WORLD_ALL  = "riatla/world/#"   # agrupa TOPIC_WORLD y todos sus subtopics
 
 # Deben coincidir exactamente con los case de ejecutarComando() en renderer.js
 EMOCIONES_VALIDAS = {"happy", "angry", "sad", "relaxed", "surprised", "neutral"}
@@ -227,8 +230,8 @@ def on_connect(client, userdata, flags, rc):
         print(f"[MQTT] Conectado a {MQTT_HOST}:{MQTT_PORT}")
         client.subscribe(TOPIC_EMOCION)
         client.subscribe(TOPIC_RESET)
-        client.subscribe(TOPIC_WORLD)
-        print(f"[MQTT] Escuchando: {TOPIC_EMOCION}, {TOPIC_RESET}, {TOPIC_WORLD}")
+        client.subscribe(TOPIC_WORLD_ALL)
+        print(f"[MQTT] Escuchando: {TOPIC_EMOCION}, {TOPIC_RESET}, {TOPIC_WORLD_ALL}")
         client.publish(TOPIC_ESTADO, json.dumps({
             "emocion": "neutral",
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -269,6 +272,9 @@ def on_message(client, userdata, msg):
     if topic == TOPIC_WORLD:
         set_world(payload_raw, mqtt_client=client)
 
+    if topic == TOPIC_WORLD_LUZ:
+        set_world_luz(payload_raw)
+
 def set_world(path: str, mqtt_client=None):
     """
     Cambia el escenario 3D enviando la ruta del archivo al renderer.
@@ -282,6 +288,19 @@ def set_world(path: str, mqtt_client=None):
 def set_world_rotation(angulo: float, mqtt_client=None):
     """Rota el escenario sobre el eje Y. angulo en radianes."""
     enviar_comando("world_rotation", {"y": angulo})
+
+def set_world_luz(estado_luz: str):
+    """
+    Enciende o apaga la iluminación de la habitación.
+    Args:
+        estado_luz: "on" | "off" (case-insensitive).
+    """
+    estado_luz = estado_luz.lower().strip()
+    if estado_luz not in ("on", "off"):
+        print(f"[Riatla] world/luz: valor desconocido '{estado_luz}' — usar 'on' u 'off'")
+        return
+    enviar_comando("world_luz", {"estado": estado_luz})
+    print(f"[Riatla] Iluminación → {estado_luz}")
 
 
 

@@ -18,6 +18,7 @@ const VRM_MODEL     = './models/riatla.vrm';
 
 let currentVRM = null;   // instancia VRM activa
 let scene, camera, renderer;
+let ambientLight, directionalLight; // referencias para control de iluminación
 let ws        = null;    // conexión WebSocket activa
 let vrmLoaded = false;
 
@@ -64,10 +65,10 @@ function setupScene() {
   renderer.toneMappingExposure = 0.7;
 
   // Iluminación
-  const ambientLight = new THREE.AmbientLight(0xffffff, 1.0);
+  ambientLight = new THREE.AmbientLight(0xffffff, 1.0);
   scene.add(ambientLight);
 
-  const directionalLight = new THREE.DirectionalLight(0xffffff, 1.0);
+  directionalLight = new THREE.DirectionalLight(0xffffff, 1.0);
   directionalLight.position.set(1, 2, 2);
   scene.add(directionalLight);
 
@@ -452,6 +453,194 @@ function desactivarAngry() {
 }
 
 
+// ── Pose sad ────────────────────────────────────────────────────────────────
+
+/**
+ * Cabeza caída, hombros hundidos, brazos pegados al cuerpo.
+ */
+function poseSad(vrm) {
+  const lado = Math.random() < 0.5 ? 1 : -1;
+
+  // Cabeza inclinada hacia abajo, leve giro aleatorio
+  lerpHueso(vrm, 'head', { x:  0.2, y: lado * 0.1, z: lado * 0.04 });
+  lerpHueso(vrm, 'neck', { x:  0.15, y: lado * 0.05, z: 0 });
+
+  // Brazos caídos, hombros hundidos hacia adelante
+  lerpHueso(vrm, 'leftUpperArm',  { x:  0.12, y: 0, z: -0.9 });
+  lerpHueso(vrm, 'rightUpperArm', { x:  0.12, y: 0, z:  0.9 });
+  lerpHueso(vrm, 'leftLowerArm',  { x:  0,    y: 0, z: -0.1 });
+  lerpHueso(vrm, 'rightLowerArm', { x:  0,    y: 0, z:  0.1 });
+
+  iniciarLerp();
+}
+
+/**
+ * Activa la emoción "sad": expresión facial + pose corporal + auto-reset.
+ * @param {number} duracionSegundos - Tiempo hasta volver a neutral (default: 15 s).
+ */
+function activarSad(duracionSegundos = 15) {
+  if (!currentVRM) return;
+
+  if (expresionState.timerReset) {
+    clearTimeout(expresionState.timerReset);
+    expresionState.timerReset = null;
+  }
+
+  // Mirada ligeramente hacia abajo
+  miradaState.activa = false;
+  miradaState.targetX =  0.15;
+  miradaState.targetY =  0;
+
+  activarExpresion('sad');
+  poseSad(currentVRM);
+
+  expresionState.actual = 'sad';
+  log(`Expresión: sad (${duracionSegundos}s)`);
+
+  expresionState.timerReset = setTimeout(() => {
+    desactivarSad();
+  }, duracionSegundos * 1000);
+}
+
+/** Revierte la emoción sad: expresión neutral + pose reposo + reactiva mirada idle. */
+function desactivarSad() {
+  if (!currentVRM) return;
+
+  activarExpresion('neutral');
+  poseNeutral(currentVRM);
+
+  miradaState.targetX = 0;
+  miradaState.targetY = 0;
+  miradaState.activa  = true;
+  programarSiguienteMirada();
+
+  expresionState.actual = 'neutral';
+  log('Expresión: neutral (desde sad)');
+}
+
+
+// ── Pose relaxed ────────────────────────────────────────────────────────────
+
+/**
+ * Cabeza suavemente inclinada a un lado, brazos relajados y ligeramente abiertos.
+ */
+function poseRelaxed(vrm) {
+  const lado = Math.random() < 0.5 ? 1 : -1;
+
+  // Cabeza ladeada con suavidad
+  lerpHueso(vrm, 'head', { x: 0, y: lado * 0.1, z: lado * 0.08 });
+  lerpHueso(vrm, 'neck', { x: 0, y: lado * 0.06, z: lado * 0.04 });
+
+  // Brazos un poco más abiertos que en reposo
+  lerpHueso(vrm, 'leftUpperArm',  { x: 0, y: 0, z: -1.0 });
+  lerpHueso(vrm, 'rightUpperArm', { x: 0, y: 0, z:  1.0 });
+  lerpHueso(vrm, 'leftLowerArm',  { x: 0, y: 0, z:  0   });
+  lerpHueso(vrm, 'rightLowerArm', { x: 0, y: 0, z:  0   });
+
+  iniciarLerp();
+}
+
+/**
+ * Activa la emoción "relaxed": expresión facial + pose corporal + auto-reset.
+ * La animación de mirada idle permanece activa para mayor naturalidad.
+ * @param {number} duracionSegundos - Tiempo hasta volver a neutral (default: 20 s).
+ */
+function activarRelaxed(duracionSegundos = 20) {
+  if (!currentVRM) return;
+
+  if (expresionState.timerReset) {
+    clearTimeout(expresionState.timerReset);
+    expresionState.timerReset = null;
+  }
+
+  activarExpresion('relaxed');
+  poseRelaxed(currentVRM);
+
+  expresionState.actual = 'relaxed';
+  log(`Expresión: relaxed (${duracionSegundos}s)`);
+
+  expresionState.timerReset = setTimeout(() => {
+    desactivarRelaxed();
+  }, duracionSegundos * 1000);
+}
+
+/** Revierte la emoción relaxed: expresión neutral + pose reposo. */
+function desactivarRelaxed() {
+  if (!currentVRM) return;
+
+  activarExpresion('neutral');
+  poseNeutral(currentVRM);
+
+  expresionState.actual = 'neutral';
+  log('Expresión: neutral (desde relaxed)');
+}
+
+
+// ── Pose surprised ──────────────────────────────────────────────────────────
+
+/**
+ * Cabeza ligeramente echada hacia atrás, brazos abiertos y levantados.
+ */
+function poseSurprised(vrm) {
+  // Cabeza hacia atrás (barbilla arriba)
+  lerpHueso(vrm, 'head', { x: -0.1, y: 0, z: 0 });
+  lerpHueso(vrm, 'neck', { x: -0.08, y: 0, z: 0 });
+
+  // Brazos levantados y abiertos — reacción de sobresalto
+  lerpHueso(vrm, 'leftUpperArm',  { x:  0,   y: -0.3, z: -0.7 });
+  lerpHueso(vrm, 'rightUpperArm', { x:  0,   y:  0.3, z:  0.7 });
+  lerpHueso(vrm, 'leftLowerArm',  { x:  0.4, y:  0,   z: -0.2 });
+  lerpHueso(vrm, 'rightLowerArm', { x:  0.4, y:  0,   z:  0.2 });
+
+  iniciarLerp();
+}
+
+/**
+ * Activa la emoción "surprised": expresión facial + pose corporal + auto-reset.
+ * Pausa la animación idle de mirada y la dirige ligeramente hacia arriba.
+ * @param {number} duracionSegundos - Tiempo hasta volver a neutral (default: 5 s).
+ */
+function activarSurprised(duracionSegundos = 5) {
+  if (!currentVRM) return;
+
+  if (expresionState.timerReset) {
+    clearTimeout(expresionState.timerReset);
+    expresionState.timerReset = null;
+  }
+
+  // Mirada ligeramente hacia arriba (acompasa la cabeza echada atrás)
+  miradaState.activa  = false;
+  miradaState.targetX = -0.1;
+  miradaState.targetY =  0;
+
+  activarExpresion('surprised');
+  poseSurprised(currentVRM);
+
+  expresionState.actual = 'surprised';
+  log(`Expresión: surprised (${duracionSegundos}s)`);
+
+  expresionState.timerReset = setTimeout(() => {
+    desactivarSurprised();
+  }, duracionSegundos * 1000);
+}
+
+/** Revierte la emoción surprised: expresión neutral + pose reposo + reactiva mirada idle. */
+function desactivarSurprised() {
+  if (!currentVRM) return;
+
+  activarExpresion('neutral');
+  poseNeutral(currentVRM);
+
+  miradaState.targetX = 0;
+  miradaState.targetY = 0;
+  miradaState.activa  = true;
+  programarSiguienteMirada();
+
+  expresionState.actual = 'neutral';
+  log('Expresión: neutral (desde surprised)');
+}
+
+
 /**
  * Rota la cabeza hacia coordenadas exactas (sin lerp).
  * Útil para comandos externos puntuales vía WebSocket.
@@ -757,8 +946,11 @@ function connectWebSocket() {
 // correspondientes. Estructura del mensaje: { accion, parametros }
 //
 // Acciones disponibles:
-//   emocion_happy / sad / relaxed / surprised / neutral  → expresión simple
-//   emocion_angry          → expresión + pose + auto-reset (parametros.duracion)
+//   emocion_happy / neutral             → expresión simple
+//   emocion_angry                       → expresión + pose + auto-reset (parametros.duracion)
+//   emocion_sad                         → expresión + pose + auto-reset (parametros.duracion)
+//   emocion_relaxed                     → expresión + pose + auto-reset (parametros.duracion)
+//   emocion_surprised                   → expresión + pose + auto-reset (parametros.duracion)
 //   hablar                 → alias de emocion_happy
 //   escuchar               → alias de emocion_neutral
 //   alerta                 → alias de emocion_surprised
@@ -769,6 +961,7 @@ function connectWebSocket() {
 //   reset                  → neutral + mirada centrada
 //   world                  → carga escenario desde parametros.path
 //   world_rotation         → rota el escenario parametros.y radianes
+//   world_luz              → iluminación on/off (parametros.estado: 'on' | 'off')
 // ═══════════════════════════════════════════════════════════════════════════
 
 function ejecutarComando(comando) {
@@ -790,7 +983,7 @@ function ejecutarComando(comando) {
       
     case 'alerta':
     case 'emocion_surprised':
-      activarExpresion('surprised');
+      activarSurprised(parametros.duracion ?? 5);
       break;
       
     case 'emocion_angry':
@@ -798,11 +991,11 @@ function ejecutarComando(comando) {
       break;
       
     case 'emocion_sad':
-      activarExpresion('sad');
+      activarSad(parametros.duracion ?? 15);
       break;
       
     case 'emocion_relaxed':
-      activarExpresion('relaxed');
+      activarRelaxed(parametros.duracion ?? 20);
       break;
 
     case 'pose_reposo':
@@ -844,6 +1037,14 @@ function ejecutarComando(comando) {
     case 'world_rotation': {
       const worldObj = scene.children.find(obj => obj.userData.isWorld);
       if (worldObj) worldObj.rotation.y = parametros.y;
+      break;
+    }
+
+    case 'world_luz': {
+      const encendida = parametros.estado === 'on';
+      ambientLight.intensity     = encendida ? 1.0 : 0.3;
+      directionalLight.intensity = encendida ? 1.0 : 0.3;
+      log(`Iluminación: ${parametros.estado}`);
       break;
     }
       
