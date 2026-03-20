@@ -275,7 +275,7 @@ const OBJECTS = {
   libro: {
     path:     './props/book1.glb',
     scale:    0.001,
-    position: { x: 0.3, y: 1.2, z: 0.5 },  // delante del avatar, a su altura
+    position: { x: 0.4, y: 1.2, z: 0.5 },  // delante del avatar, a su altura
     rotation: { x: 0,   y: 180,   z: 0   }
   },
   guitarra: {
@@ -851,9 +851,15 @@ function animarObjetos() {
     const config = OBJECTS[nombre];
     if (!config) return;
 
-    // Flotación vertical suave — sin desplazamiento horizontal
-    const floatY = Math.sin(objetoTime + (config._seed ?? 0)) * 0.03;
+    const seed = config._seed ?? 0;
+
+    // Flotación vertical
+    const floatY = Math.sin(objetoTime       + seed) * 0.01;
+    // Flotación horizontal — frecuencia irracional respecto a Y
+    const floatX = Math.sin(objetoTime * 0.7 + seed + 1.3) * 0.01;
+
     obj.position.y = config.position.y + floatY;
+    obj.position.x = config.position.x + floatX;
 
     // Rotación lenta sobre Y para dar sensación de objeto mágico/ingrávido
     //obj.rotation.y = config.rotation.y + objetoTime * 0.3;
