@@ -272,7 +272,13 @@ def on_message(client, userdata, msg):
         set_emocion(emocion, duracion=duracion, mqtt_client=client)
 
     if topic == TOPIC_WORLD:
-        set_world(payload_raw, mqtt_client=client)
+        try:
+            data   = json.loads(payload_raw)
+            nombre = data.get("mundo", "JapaneseRoom")
+        except json.JSONDecodeError:
+            nombre = payload_raw  # acepta también texto plano: "TinyRoom"
+        enviar_comando("world", {"nombre": nombre})
+        print(f"[Riatla] World → {nombre}")
 
     if topic == TOPIC_WORLD_LUZ:
         set_world_luz(payload_raw)

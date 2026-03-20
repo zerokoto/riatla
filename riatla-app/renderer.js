@@ -2,6 +2,10 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
 import { KTX2Loader } from 'three/examples/jsm/loaders/KTX2Loader.js';
+//import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
+import { RGBELoader } from 'three/examples/jsm/loaders/RGBELoader.js';
+
+//const path = require('path');
 
 // ═══════════════════════════════════════════════════════════════════════════
 // CONFIGURACIÓN
@@ -34,6 +38,12 @@ const state = {
 // Inicialización del renderer, cámara e iluminación.
 // ═══════════════════════════════════════════════════════════════════════════
 
+// Estado del shake de cámara
+const cameraShake = {
+  basePos: null,  // se inicializa al cargar el mundo
+  time: 0
+};
+
 function setupScene() {
   // Canvas
   const canvas = document.getElementById('canvas');
@@ -49,12 +59,9 @@ function setupScene() {
     0.1,
     1000
   );
-  //camera.position.set(3, 1.8, 6); // Posición para TinyRoom
-  //camera.lookAt(0, 1.2, 0); // Posición para TinyRoom
-  //camera.position.set(3, 1.8, 6);  // Posición para TatamiRoom
-  //camera.lookAt(0, 0.8, 0);  // Posición para TatamiRoom
-  camera.position.set(3, 1.8, 6);  // Posición para JapaneseRoom
-  camera.lookAt(0, 1.2, 0);  // Posición para JapaneseRoom
+
+  camera.position.set(3, 1.8, 6);
+  camera.lookAt(0, 1.2, 0); 
 
 
   // Renderer
@@ -70,7 +77,7 @@ function setupScene() {
   renderer.toneMappingExposure = 0.7;
 
   // Iluminación
-  ambientLight = new THREE.AmbientLight(0xffffff, 1.0);
+  ambientLight = new THREE.AmbientLight(0xffffff, 1.2);
   scene.add(ambientLight);
 
   directionalLight = new THREE.DirectionalLight(0xffffff, 0.9);
@@ -146,62 +153,115 @@ function loadVRM() {
   );
 }
 
-/**
- * Carga un escenario GLTF, lo escala para que ocupe ~2.5 m de diámetro
- * y lo centra en el origen. Elimina el escenario anterior si existía.
- * @param {string} path - Ruta relativa al archivo GLTF/GLB.
- */
-function loadWorld(path = './world/JapaneseRoom/scene.gltf') {
+// ═══════════════════════════════════════════════════════════════════════════
+// CONFIGURACIÓN DE MUNDOS
+// ═══════════════════════════════════════════════════════════════════════════
+
+const WORLDS = {
+  Studio: {
+    path:     './world/Studio/studio.glb',
+    scale:    4.5,
+    rotation: 0,
+    offset:   { x: -1, y: 0, z: -1 },
+    hdr:      './textures/studio.hdr',   // ← añadir
+    camera:   { pos: [3, 1.8, 6], lookAt: [0, 1.2, 0] }
+  },
+  TinyRoom: {
+    path:     './world/TinyRoom/TinyRoom.glb',
+    scale:    2.5,
+    rotation: 0,
+    hdr:      './textures/studio.hdr',            // ← añadir
+    camera:   { pos: [3, 1.8, 6], lookAt: [0, 1.2, 0] }
+  },
+  Space: {
+    path:     './world/Space/space.glb',
+    scale:    4,
+    rotation: Math.PI + 0.1,
+    hdr:      './textures/space.hdr',           // ← añadir
+    camera:   { pos: [3, 1.8, 6], lookAt: [0, 1.2, 0] }
+  }
+};
+
+function loadWorld(nombre = 'TinyRoom') {
+  const config = WORLDS[nombre];
+  if (!config) {
+    log(`✗ Mundo desconocido: ${nombre}`);
+    return;
+  }
+
+  scene.children
+    .filter(obj => obj.userData.isWorld)
+    .forEach(obj => scene.remove(obj));
+
+  const { pos, lookAt } = config.camera;
+  camera.position.set(...pos);
+  camera.lookAt(...lookAt);
+  cameraShake.basePos = null;
+
+  // Cargar HDR específico del mundo
+  if (config.hdr) {
+    const pmremGenerator = new THREE.PMREMGenerator(renderer);
+    pmremGenerator.compileEquirectangularShader();
+
+    new RGBELoader().load(
+      config.hdr,
+      (texture) => {
+        const envMap = pmremGenerator.fromEquirectangular(texture).texture;
+        scene.environment = envMap;
+        texture.dispose();
+        pmremGenerator.dispose();
+        log(`✓ HDR cargado: ${config.hdr}`);
+      },
+      undefined,
+      (err) => log(`✗ Error HDR: ${err.message}`)
+    );
+  }
+
   const ktx2Loader = new KTX2Loader()
     .setTranscoderPath('three/examples/jsm/libs/basis/')
     .detectSupport(renderer);
+
   const loader = new GLTFLoader();
   loader.setKTX2Loader(ktx2Loader);
+
   loader.load(
-    path,
+    config.path,
     (gltf) => {
       const world = gltf.scene;
-      world.userData.isWorld = true;
+      world.userData.isWorld     = true;
+      world.userData.nombreMundo = nombre;
 
       const box  = new THREE.Box3().setFromObject(world);
       const size = box.getSize(new THREE.Vector3());
 
-      // Escalar para que el eje mayor ocupe ~2.5 m (unidades VRM = metros)
-      //const scale = 2.5 / Math.max(size.x, size.z); // Escala para TinyRoom
-      //const scale = 40 / Math.max(size.x, size.z); // Escala para TatamiRoom
-      const scale = 4 / Math.max(size.x, size.z); // Escala para JapaneseRoom
-
+      const scale = config.scale / Math.max(size.x, size.z);
       world.scale.setScalar(scale);
 
-      // Resetear posición y rotación antes de calcular el bounding box
       world.position.set(0, 0, 0);
       world.rotation.set(0, 0, 0);
 
-      // Recentrar DESPUÉS de escalar
       box.setFromObject(world);
       const scaledCenter = box.getCenter(new THREE.Vector3());
       const scaledMin    = box.min;
 
-      // Centrar en X/Z, apoyar el suelo en Y=0
-      world.position.set(
-        -scaledCenter.x,
-        -scaledMin.y,
-        -scaledCenter.z
-      );
+      world.position.set(-scaledCenter.x, -scaledMin.y, -scaledCenter.z);
+      world.rotation.y = config.rotation;
 
-      //world.rotation.y = 0; // Posicion para TinyRoom (mirando hacia la cámara)
-      //world.rotation.y = Math.PI; // Posicion para TatamiRoom (mirando hacia la cámara)
-      world.rotation.y = 0; // Posicion para JapaneseRoom (mirando hacia la cámara)
+      if (config.offset) {
+        world.position.x += config.offset.x;
+        world.position.y += config.offset.y;
+        world.position.z += config.offset.z;
+      }
 
       scene.add(world);
-      log(`✓ Escenario cargado (escala: ${scale.toFixed(3)}, size: ${size.x.toFixed(1)}x${size.y.toFixed(1)}x${size.z.toFixed(1)})`);
+      log(`✓ Mundo: ${nombre} (escala: ${scale.toFixed(3)}, size: ${size.x.toFixed(1)}x${size.y.toFixed(1)}x${size.z.toFixed(1)})`);
     },
     (progress) => {
       const pct = Math.round((progress.loaded / progress.total) * 100);
-      log(`Cargando escenario... ${pct}%`);
+      log(`Cargando ${nombre}... ${pct}%`);
     },
     (error) => {
-      log(`✗ Error escenario: ${error.message}`);
+      log(`✗ Error cargando ${nombre}: ${error.message}`);
     }
   );
 }
@@ -696,10 +756,28 @@ function animate() {
     animarMirada();
     animarMusica();
   }
-  
+  animarCamara();
   renderer.render(scene, camera);
 }
 
+// ── Shake de cámara ────────────────────────────────────────────────────────────
+function animarCamara() {
+  if (!cameraShake.basePos) {
+    cameraShake.basePos = camera.position.clone();
+  }
+
+  cameraShake.time += 0.008;
+  const t = cameraShake.time;
+
+  // Frecuencias irracionales entre sí → movimiento no periódico
+  const offsetX = Math.sin(t * 0.7  + 1.3) * 0.006  // ← antes 0.0015
+                + Math.sin(t * 1.3  + 0.5) * 0.003;  // ← antes 0.0008
+  const offsetY = Math.sin(t * 0.9  + 2.1) * 0.005  // ← antes 0.0012
+                + Math.sin(t * 1.7  + 1.1) * 0.002;  // ← antes 0.0006
+
+  camera.position.x = cameraShake.basePos.x + offsetX;
+  camera.position.y = cameraShake.basePos.y + offsetY;
+}
 
 // ── Respiración ────────────────────────────────────────────────────────────
 // Movimiento sutil del pecho, columna y hombros. Se llama cada frame.
@@ -1231,13 +1309,8 @@ function ejecutarComando(comando) {
       break;
 
     case 'world': {
-      const { path } = parametros;
-      if (path) {
-        scene.children
-          .filter(obj => obj.userData.isWorld)
-          .forEach(obj => scene.remove(obj));
-        loadWorld(path);
-      }
+      const nombre = parametros.nombre ?? parametros.path ?? 'TinyRoom';
+      loadWorld(nombre);
       break;
     }
     
@@ -1249,8 +1322,8 @@ function ejecutarComando(comando) {
 
     case 'world_luz': {
       const encendida = parametros.estado === 'on';
-      ambientLight.intensity     = encendida ? 1.0 : 0.3;
-      directionalLight.intensity = encendida ? 0.9 : 0.3;
+      ambientLight.intensity     = encendida ? 1.2 : 0.3;
+      directionalLight.intensity = encendida ? 0.8 : 0.3;
       log(`Iluminación: ${parametros.estado}`);
       break;
     }
@@ -1299,7 +1372,7 @@ function log(message) {
 window.addEventListener('load', () => {
   log('Inicializando Riatla...');
   setupScene();
-  loadWorld();
+  loadWorld('TinyRoom');
   loadVRM();
   connectWebSocket();
 });
