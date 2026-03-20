@@ -266,6 +266,85 @@ function loadWorld(nombre = 'TinyRoom') {
   );
 }
 
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CONFIGURACIÓN DE OBJETOS
+// ═══════════════════════════════════════════════════════════════════════════
+
+const OBJECTS = {
+  libro: {
+    path:     './props/book1.glb',
+    scale:    0.001,
+    position: { x: 0.3, y: 1.2, z: 0.5 },  // delante del avatar, a su altura
+    rotation: { x: 0,   y: 180,   z: 0   }
+  },
+  guitarra: {
+    path:     './props/guitarra/guitar.glb',
+    scale:    1.0,
+    position: { x: -0.4, y: 0.0, z: 0.3 },
+    rotation: { x: 0,    y: 0.3, z: 0   }
+  },
+  taza: {
+    path:     './props/taza/cup.glb',
+    scale:    0.3,
+    position: { x: 0.2, y: 1.0, z: 0.4 },
+    rotation: { x: 0,   y: 0,   z: 0   }
+  }
+};
+
+// ── Gestión de objetos activos ─────────────────────────────────────────────
+
+const objetosActivos = {};  // { [nombre]: THREE.Object3D }
+
+function addObjeto(nombre) {
+  const config = OBJECTS[nombre];
+  if (!config) {
+    log(`✗ Objeto desconocido: ${nombre}`);
+    return;
+  }
+
+  // Si ya existe, quitarlo primero
+  if (objetosActivos[nombre]) removeObjeto(nombre);
+
+  const loader = new GLTFLoader();
+  loader.load(
+    config.path,
+    (gltf) => {
+      const obj = gltf.scene;
+      obj.userData.isObjeto   = true;
+      obj.userData.nombreObj  = nombre;
+
+      // Escala directa (no adaptativa — los props tienen tamaño conocido)
+      obj.scale.setScalar(config.scale);
+
+      obj.position.set(config.position.x, config.position.y, config.position.z);
+      obj.rotation.set(config.rotation.x, config.rotation.y, config.rotation.z);
+
+      scene.add(obj);
+      objetosActivos[nombre] = obj;
+      log(`✓ Objeto añadido: ${nombre}`);
+    },
+    undefined,
+    (error) => log(`✗ Error cargando objeto ${nombre}: ${error.message}`)
+  );
+}
+
+function removeObjeto(nombre) {
+  const obj = objetosActivos[nombre];
+  if (!obj) {
+    log(`⚠ Objeto no activo: ${nombre}`);
+    return;
+  }
+  scene.remove(obj);
+  delete objetosActivos[nombre];
+  log(`✓ Objeto eliminado: ${nombre}`);
+}
+
+function removeAllObjetos() {
+  Object.keys(objetosActivos).forEach(removeObjeto);
+  log('Objetos limpiados');
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // POSES CORPORALES
 // Posiciones de huesos que definen el lenguaje corporal del avatar.
@@ -756,9 +835,33 @@ function animate() {
     animarMirada();
     animarMusica();
   }
+  animarObjetos(); 
   animarCamara();
   renderer.render(scene, camera);
 }
+
+// ── Animación de objetos flotantes ─────────────────────────────────────────
+
+let objetoTime = 0;
+
+function animarObjetos() {
+  objetoTime += 0.01;
+
+  Object.entries(objetosActivos).forEach(([nombre, obj]) => {
+    const config = OBJECTS[nombre];
+    if (!config) return;
+
+    // Flotación vertical suave — sin desplazamiento horizontal
+    const floatY = Math.sin(objetoTime + (config._seed ?? 0)) * 0.03;
+    obj.position.y = config.position.y + floatY;
+
+    // Rotación lenta sobre Y para dar sensación de objeto mágico/ingrávido
+    //obj.rotation.y = config.rotation.y + objetoTime * 0.3;
+    // Sin rotacion:
+    obj.rotation.y = config.rotation.y;
+  });
+}
+
 
 // ── Shake de cámara ────────────────────────────────────────────────────────────
 function animarCamara() {
@@ -1331,6 +1434,15 @@ function ejecutarComando(comando) {
     case 'world_musica':
       animacion_musica(parametros.estado === 'on', parametros.modo ?? 'normal');
       break;
+
+    case 'objeto': {
+      const { nombre, accion: accionObj = 'add' } = parametros;
+      if (!nombre) break;
+      if (accionObj === 'remove') removeObjeto(nombre);
+      else if (accionObj === 'clear') removeAllObjetos();
+      else addObjeto(nombre);
+      break;
+    }
       
     default:
       log(`⚠ Acción desconocida: ${accion}`);

@@ -60,6 +60,7 @@ TOPIC_WORLD      = "riatla/world"
 TOPIC_WORLD_LUZ  = "riatla/world/luz"
 TOPIC_WORLD_MUSICA = "riatla/world/musica"
 TOPIC_WORLD_ALL  = "riatla/world/#"   # agrupa TOPIC_WORLD y todos sus subtopics
+TOPIC_OBJETO     = "riatla/objeto"
 
 # Deben coincidir exactamente con los case de ejecutarComando() en renderer.js
 EMOCIONES_VALIDAS = {"happy", "angry", "sad", "relaxed", "surprised", "neutral"}
@@ -233,6 +234,7 @@ def on_connect(client, userdata, flags, rc):
         client.subscribe(TOPIC_EMOCION)
         client.subscribe(TOPIC_RESET)
         client.subscribe(TOPIC_WORLD_ALL)
+        client.subscribe(TOPIC_OBJETO)
         print(f"[MQTT] Escuchando: {TOPIC_EMOCION}, {TOPIC_RESET}, {TOPIC_WORLD_ALL}")
         client.publish(TOPIC_ESTADO, json.dumps({
             "emocion": "neutral",
@@ -292,6 +294,17 @@ def on_message(client, userdata, msg):
             estado_musica = payload_raw   # acepta texto plano: "on" / "off"
             modo_musica   = "normal"
         set_world_musica(estado_musica, modo_musica)
+
+    if topic == TOPIC_OBJETO:
+        try:
+            data = json.loads(payload_raw)
+            nombre  = data.get("objeto", "")
+            accion  = data.get("accion", "add")  # add | remove | clear
+        except json.JSONDecodeError:
+            nombre = payload_raw
+            accion = "add"
+        enviar_comando("objeto", {"nombre": nombre, "accion": accion})
+        print(f"[Riatla] Objeto → {accion}: {nombre}")
 
 def set_world(path: str, mqtt_client=None):
     """
