@@ -68,7 +68,7 @@ function setupScene() {
   ambientLight = new THREE.AmbientLight(0xffffff, 1.0);
   scene.add(ambientLight);
 
-  directionalLight = new THREE.DirectionalLight(0xffffff, 1.0);
+  directionalLight = new THREE.DirectionalLight(0xffffff, 0.9);
   directionalLight.position.set(1, 2, 2);
   scene.add(directionalLight);
 
@@ -534,8 +534,8 @@ function poseRelaxed(vrm) {
   lerpHueso(vrm, 'neck', { x: 0, y: lado * 0.06, z: lado * 0.04 });
 
   // Brazos un poco más abiertos que en reposo
-  lerpHueso(vrm, 'leftUpperArm',  { x: 0, y: 0, z: -1.0 });
-  lerpHueso(vrm, 'rightUpperArm', { x: 0, y: 0, z:  1.0 });
+  lerpHueso(vrm, 'leftUpperArm',  { x: 0, y: 0, z: -1.5 });
+  lerpHueso(vrm, 'rightUpperArm', { x: 0, y: 0.5, z:  1.5 });
   lerpHueso(vrm, 'leftLowerArm',  { x: 0, y: 0, z:  0   });
   lerpHueso(vrm, 'rightLowerArm', { x: 0, y: 0, z:  0   });
 
@@ -759,7 +759,7 @@ function programarSiguienteMirada() {
     log(`Mirada → H:${Math.round(miradaState.targetY * 180 / Math.PI)}° V:${Math.round(miradaState.targetX * 180 / Math.PI)}°`);
 
     // Después de la espera, volver al centro
-    const esperaCentro = randomEntre(5000, 10000); // 5-10s en el centro
+    const esperaCentro = randomEntre(1000, 5000); // 1-5s en el centro
     miradaState.timer = setTimeout(() => {
       miradaState.targetX = 0;
       miradaState.targetY = 0;
@@ -968,37 +968,36 @@ function animarMusica() {
   // Frecuencias primas entre sí → periodo de repetición > 30 minutos reales
   const mod1 = 0.65 + 0.35 * Math.sin(t * 0.031 + r1); // modula amplitud brazos
   const mod2 = 0.65 + 0.35 * Math.sin(t * 0.017 + r2); // modula amplitud antebrazos y cuello
-  const mod3 = 0.90 + 0.10 * Math.sin(t * 0.023 + r3); // modula la frecuencia base del sway
+  const mod3 = 0.50 + 0.10 * Math.sin(t * 0.023 + r3); // modula la frecuencia base del sway 0.90
 
   // ── Caderas y columna: sway en S ──────────────────────────────────────────
+  // FRECUENCIA FIJA — mod3 solo modula amplitud, no velocidad
+  const swayBase = Math.sin(t * 0.9);  // frecuencia fija
+
   const hips = humanoid.getNormalizedBoneNode('hips');
-  if (hips)  hips.rotation.z  =  Math.sin(t * mod3)        * 0.02  * amp;
+  if (hips)  hips.rotation.z  =  swayBase         * 0.02  * mod3 * amp;
 
   const spine = humanoid.getNormalizedBoneNode('spine');
-  if (spine) spine.rotation.z = -Math.sin(t * mod3)        * 0.025 * amp;
-  // spine.rotation.x → animarRespiracion
+  if (spine) spine.rotation.z = -swayBase         * 0.025 * mod3 * amp;
 
   const chest = humanoid.getNormalizedBoneNode('chest');
-  if (chest) chest.rotation.z = -Math.sin(t * mod3 + 0.4)  * 0.02  * amp;
-  // chest.rotation.x → animarRespiracion
+  if (chest) chest.rotation.z = -Math.sin(t * 0.9 + 0.4) * 0.02 * mod3 * amp;
 
-  // ── Brazos superiores: movimiento sutil contralateral ────────────────────
-  const leftArm  = humanoid.getNormalizedBoneNode('leftUpperArm');
-  const rightArm = humanoid.getNormalizedBoneNode('rightUpperArm');
+  // ── Brazos superiores ────────────────────────────────────────────────────
+  const swayArm = Math.sin(t + Math.PI);  // frecuencia fija
   if (leftArm) {
-    leftArm.rotation.z = -1.2 + Math.sin(t + Math.PI) * 0.03  * mod1 * amp;
+    leftArm.rotation.z = -1.2 + swayArm              * 0.03  * mod1 * amp;
     leftArm.rotation.x =        Math.sin(t * 2 + 1.0) * 0.015 * mod2 * amp;
   }
   if (rightArm) {
-    rightArm.rotation.z = 1.2 - Math.sin(t + Math.PI) * 0.03  * mod1 * amp;
+    rightArm.rotation.z = 1.2 - swayArm               * 0.03  * mod1 * amp;
     rightArm.rotation.x =       Math.sin(t * 2)        * 0.015 * mod2 * amp;
   }
 
-  // ── Antebrazos: demora de fase ────────────────────────────────────────────
-  const leftLower  = humanoid.getNormalizedBoneNode('leftLowerArm');
-  const rightLower = humanoid.getNormalizedBoneNode('rightLowerArm');
-  if (leftLower)  leftLower.rotation.z  = -0.2 + Math.sin(t * 1.5 + 0.5) * 0.02 * mod2 * amp;
-  if (rightLower) rightLower.rotation.z =  0.2 - Math.sin(t * 1.5 + 0.5) * 0.02 * mod2 * amp;
+  // ── Antebrazos ────────────────────────────────────────────────────────────
+  const swayLower = Math.sin(t * 1.5 + 0.5);  // frecuencia fija
+  if (leftLower)  leftLower.rotation.z  = -0.2 + swayLower * 0.02 * mod2 * amp;
+  if (rightLower) rightLower.rotation.z =  0.2 - swayLower * 0.02 * mod2 * amp;
 
   // ── Muñecas: al doble de frecuencia, fase aleatoria ──────────────────────
   const leftHand  = humanoid.getNormalizedBoneNode('leftHand');
@@ -1013,9 +1012,12 @@ function animarMusica() {
   }
 
   // ── Cuello: cabezeo; head.rotation.x/.y → animarMirada ───────────────────
+  let ritmoVisible;
   const neck = humanoid.getNormalizedBoneNode('neck');
+  // ── Cuello ────────────────────────────────────────────────────────────────
   if (neck) {
-    neck.rotation.z = -Math.sin(t + 0.6)      * 0.025 * mod3 * amp;
+    ritmoVisible = Math.sin(t + 0.6);  // ← guardar aquí
+    neck.rotation.z = -ritmoVisible      * 0.025 * mod3 * amp;
     neck.rotation.y =  Math.sin(t * 0.5 + r2) * 0.03  * mod1 * amp;
     neck.rotation.x =  Math.abs(Math.sin(t))  * 0.02  * mod2 * amp;
   }
@@ -1028,14 +1030,29 @@ function animarMusica() {
   if (musicaState.modo === 'metal') {
     const head = humanoid.getNormalizedBoneNode('head');
     const bang  = Math.pow(Math.max(0, Math.sin(t * 1.5)), 0.85);
+    ritmoVisible = bang;
     if (head) {
       head.rotation.x = (0.02 + bang * 0.08) * amp;  // 0.02 reposo → 0.16 nod máximo
       head.rotation.y = miradaState.currentY;          // preservar giro lateral de mirada
     }
+    
     if (neck) {
       neck.rotation.x = (0.015 + bang * 0.04) * amp;  // cuello acompaña el cabezazo
     }
   }
+
+  // ── Dedo índice ───────────────────────────────────────────────────────────
+  if (!musicaState._dedoSeed) musicaState._dedoSeed = Math.random() < 0.5 ? 'left' : 'right';
+  const ladoDedo = musicaState._dedoSeed;
+
+  const dedoProximal     = humanoid.getNormalizedBoneNode(`${ladoDedo}IndexProximal`);
+  const dedoIntermediate = humanoid.getNormalizedBoneNode(`${ladoDedo}IndexIntermediate`);
+
+  if (dedoProximal && ritmoVisible !== undefined) {
+    dedoProximal.rotation.z     = (ladoDedo === 'left' ? -0.3 : 0.3) + ritmoVisible * 0.15 * amp;
+    dedoIntermediate.rotation.z = (ladoDedo === 'left' ? -0.3 : 0.3) + ritmoVisible * 0.10 * amp;
+  }
+
 }
 
 /**
@@ -1053,6 +1070,7 @@ function animacion_musica(activar = true, modo = 'normal') {
     musicaState.modo    = modo;
     musicaState.activa  = true;
     musicaState.fadeDir = 1;
+    musicaState._dedoSeed = null;  // ← se sorteará de nuevo en el primer frame
     log(`Música activada (${modo})`);
   } else {
     musicaState.activa  = false;
@@ -1164,7 +1182,7 @@ function ejecutarComando(comando) {
       break;
       
     case 'emocion_relaxed':
-      activarRelaxed(parametros.duracion ?? 20);
+      activarRelaxed(parametros.duracion ?? 10);
       break;
 
     case 'pose_reposo':
@@ -1212,7 +1230,7 @@ function ejecutarComando(comando) {
     case 'world_luz': {
       const encendida = parametros.estado === 'on';
       ambientLight.intensity     = encendida ? 1.0 : 0.3;
-      directionalLight.intensity = encendida ? 1.0 : 0.3;
+      directionalLight.intensity = encendida ? 0.9 : 0.3;
       log(`Iluminación: ${parametros.estado}`);
       break;
     }
