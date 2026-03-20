@@ -359,11 +359,22 @@ function poseAngry(vrm) {
   // Lado aleatorio para dar variedad entre activaciones
   const lado = Math.random() < 0.5 ? 1 : -1;
 
-  // Brazos cruzados: derecho encima, izquierdo debajo (cruce clásico)
-  lerpHueso(vrm, 'rightUpperArm', { x:  0.3, y: 1, z:  0 });
-  lerpHueso(vrm, 'rightLowerArm', { x:  0, y: 2, z:  0 });
-  lerpHueso(vrm, 'leftUpperArm',  { x:  0.4, y:  -1, z: 0 });
-  lerpHueso(vrm, 'leftLowerArm',  { x:  0, y:  -2, z: 0 });
+  // Brazos cruzados: derecho abajo, izquierdo arriba (cruce clásico)
+    lerpHueso(vrm, 'rightUpperArm', { x:  0.3,  y:  0.9,  z:  1.0 });
+    lerpHueso(vrm, 'leftUpperArm',  { x:  0.28, y: -1.0,  z:  -0.5 });
+
+    lerpHueso(vrm, 'rightLowerArm', { x:  0.2,  y:  2.0,  z:  0.0 });
+    lerpHueso(vrm, 'leftLowerArm',  { x:  0.0,  y: -2.0,  z:  0.0 });
+
+    // Muñeca izquierda rotada
+    //lerpHueso(vrm, 'leftHand',      { x:  -1.0,  y: 0.1,  z: 0.0 }); // y= horizontal izquierda; x = rotado horario
+    // lerpHueso(vrm, 'rightHand',      { x:  -0.5,  y: 0.4,  z: -0.7 }); // y= horizontal izquierda; x = rotado horario
+
+    // Mano derecha (debajo): palma mirando hacia arriba/dentro
+    lerpHueso(vrm, 'rightHand', { x:  0.3,  y: 0.6,  z:  -1.2 });
+
+    // Mano izquierda (encima): palma mirando hacia abajo/dentro  
+    lerpHueso(vrm, 'leftHand',  { x: -0.3,  y:  0.3,  z:  0.5 });
 
   // Cabeza levantada (barbilla arriba) y girada al lado aleatorio
   lerpHueso(vrm, 'neck', {
