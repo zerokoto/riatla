@@ -278,18 +278,19 @@ const OBJECTS = {
     position: { x: 0.4, y: 1.2, z: 0.5 },  // delante del avatar, a su altura
     rotation: { x: 0,   y: 180,   z: 0   }
   },
-  guitarra: {
-    path:     './props/guitarra/guitar.glb',
-    scale:    1.0,
-    position: { x: -0.4, y: 0.0, z: 0.3 },
-    rotation: { x: 0,    y: 0.3, z: 0   }
+  libro2: {
+    path:     './props/book2.glb',
+    scale:    0.05,
+    position: { x: 0.35, y: 1.2, z: 0.5 },  // delante del avatar, a su altura
+    rotation: { x: 0,   y: 180,   z: 0   }
   },
-  taza: {
-    path:     './props/taza/cup.glb',
-    scale:    0.3,
-    position: { x: 0.2, y: 1.0, z: 0.4 },
-    rotation: { x: 0,   y: 0,   z: 0   }
-  }
+  libro3: {
+    path:     './props/book3.glb',
+    scale:    1,
+    position: { x: 0.4, y: 1.2, z: 0.5 },  // delante del avatar, a su altura
+    rotation: { x: 0,   y: 180,   z: 0   }
+  },
+
 };
 
 // ── Gestión de objetos activos ─────────────────────────────────────────────
@@ -323,6 +324,15 @@ function addObjeto(nombre) {
       scene.add(obj);
       objetosActivos[nombre] = obj;
       log(`✓ Objeto añadido: ${nombre}`);
+
+      // Si es un libro, pausar mirada y centrarla en el libro
+      if (nombre.startsWith('libro')) {
+        miradaState.mirandoLibro = true;
+        if (miradaState.timer) clearTimeout(miradaState.timer);
+        // Mirar ligeramente hacia abajo y hacia donde está el libro
+        miradaState.targetX =  0.15;  // ligeramente abajo (leyendo)
+        miradaState.targetY = -0.1;   // hacia su derecha donde está el libro
+      }
     },
     undefined,
     (error) => log(`✗ Error cargando objeto ${nombre}: ${error.message}`)
@@ -338,6 +348,20 @@ function removeObjeto(nombre) {
   scene.remove(obj);
   delete objetosActivos[nombre];
   log(`✓ Objeto eliminado: ${nombre}`);
+  // Si era un libro, comprobar si quedan más libros activos
+  if (nombre.startsWith('libro')) {
+    const quedanLibros = Object.keys(objetosActivos).some(n => n.startsWith('libro'));
+    if (!quedanLibros) {
+      miradaState.mirandoLibro = false;
+      // Reactivar mirada despreocupada solo si no hay emoción activa
+      if (expresionState.actual === 'neutral') {
+        miradaState.targetX = 0;
+        miradaState.targetY = 0;
+        miradaState.activa  = true;
+        programarSiguienteMirada();
+      }
+    }
+  }
 }
 
 function removeAllObjetos() {
@@ -932,7 +956,8 @@ const miradaState = {
   targetY:  0,     // objetivo rotación cabeza (izq/dcha)
   currentX: 0,     // posición interpolada actual
   currentY: 0,
-  timer:    null
+  timer:    null,
+  mirandoLibro: false
 };
 
 // ── Helpers de ángulos ──────────────────────────────────────────────────────
@@ -1000,6 +1025,12 @@ function animarMirada() {
 
   const head = currentVRM.humanoid.getNormalizedBoneNode('head');
   if (!head) return;
+
+  // Si hay libro activo, pausar animación idle pero mantener interpolación
+  if (miradaState.mirandoLibro && miradaState.activa) {
+    miradaState.activa = false;
+    if (miradaState.timer) clearTimeout(miradaState.timer);
+  }
 
   // Factor 0.02 = movimiento lento y natural
   miradaState.currentX += (miradaState.targetX - miradaState.currentX) * 0.02;
