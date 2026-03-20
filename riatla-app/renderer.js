@@ -1,25 +1,27 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
-// import { VRMLoaderPlugin, VRMUtils, MToonMaterialPlugin } from '@pixiv/three-vrm';
 
 
 // ═══════════════════════════════════════════════════════════════════════════
 // CONFIGURACIÓN
+// Parámetros de conexión y rutas de assets. Modificar según entorno.
 // ═══════════════════════════════════════════════════════════════════════════
 
-const WEBSOCKET_URL = 'ws://localhost:8765'; // tu daemon Python
-const VRM_MODEL = './models/riatla.vrm';
+const WEBSOCKET_URL = 'ws://localhost:8765'; // debe coincidir con WS_PORT en riatla_daemon.py
+const VRM_MODEL     = './models/riatla.vrm';
 
 // ═══════════════════════════════════════════════════════════════════════════
-// STATE
+// ESTADO GLOBAL
+// Variables de ciclo de vida y estado observable de la aplicación.
 // ═══════════════════════════════════════════════════════════════════════════
 
-let currentVRM = null;
+let currentVRM = null;   // instancia VRM activa
 let scene, camera, renderer;
-let ws = null;
+let ws        = null;    // conexión WebSocket activa
 let vrmLoaded = false;
 
+/** Estado observable (útil para depuración en consola). */
 const state = {
   emocionActual: 'neutral',
   wsConnected: false,
@@ -27,7 +29,8 @@ const state = {
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
-// THREE.JS SETUP
+// THREE.JS / ESCENA
+// Inicialización del renderer, cámara e iluminación.
 // ═══════════════════════════════════════════════════════════════════════════
 
 function setupScene() {
@@ -38,9 +41,8 @@ function setupScene() {
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x2d2d44);
 
-  // Cámara
+  // Ángulo reducido (10°) para acercar el plano facial sin distorsión
   camera = new THREE.PerspectiveCamera(
-    // Close to face, so we can see expressions clearly, but not too close to avoid distortion
     10,
     window.innerWidth / window.innerHeight,
     0.1,
@@ -57,8 +59,8 @@ function setupScene() {
   });
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.setPixelRatio(window.devicePixelRatio);
- renderer.outputColorSpace = THREE.SRGBColorSpace;
-  renderer.toneMapping = THREE.ACESFilmicToneMapping;  // vuelve al original
+  renderer.outputColorSpace   = THREE.SRGBColorSpace;
+  renderer.toneMapping        = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 0.7;
 
   // Iluminación
@@ -81,17 +83,13 @@ function onWindowResize() {
 
 
 // ═══════════════════════════════════════════════════════════════════════════
-// VRM LOADING
+// CARGA DE ASSETS
+// Carga del modelo VRM del avatar y del escenario 3D (GLTF/GLB).
 // ═══════════════════════════════════════════════════════════════════════════
 
 function loadVRM() {
   const loader = new GLTFLoader();
   loader.register((parser) => new VRMLoaderPlugin(parser));
-//  loader.register((parser) => new VRMLoaderPlugin(parser, {
-//    mtoonMaterialPlugin: new MToonMaterialPlugin(parser, {
-//      renderer: renderer
-//    })
-//  }));
 
   log(`Intentando cargar: ${VRM_MODEL}`);
   
@@ -102,7 +100,7 @@ function loadVRM() {
       VRMUtils.removeUnnecessaryJoints(vrm.scene);
 
 
-      // MToon 3.x necesita esto para colores correctos
+      // MToon ignora el tonemapping del renderer → hay que forzarlo en cada material
       vrm.scene.traverse((obj) => {
         if (obj.isMesh) {
           const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
@@ -122,15 +120,13 @@ function loadVRM() {
       animacion_parpadeo(true);
       vrmLoaded = true;
       
-      // Eliminar T pose para que se vea mas natural al cargar
-      activarExpresion('neutral');
+      activarExpresion('neutral'); // elimina la T-pose inicial
 
 
       updateStatus('VRM cargado', true);
       log('✓ Modelo VRM cargado correctamente');
       
-      // Iniciar animación cuando el VRM esté listo
-      animate();
+      animate(); // arranca el loop de render
     },
     (progress) => {
       const percent = Math.round((progress.loaded / progress.total) * 100);
@@ -138,13 +134,17 @@ function loadVRM() {
     },
     (error) => {
       console.error('Error cargando VRM:', error);
-      const errorMsg = error.message || JSON.stringify(error);
-      log(`✗ Error cargando modelo: ${errorMsg}`);
+      log(`✗ Error cargando modelo: ${error.message || JSON.stringify(error)}`);
       updateStatus('Error cargando VRM', false);
     }
   );
 }
 
+/**
+ * Carga un escenario GLTF, lo escala para que ocupe ~2.5 m de diámetro
+ * y lo centra en el origen. Elimina el escenario anterior si existía.
+ * @param {string} path - Ruta relativa al archivo GLTF/GLB.
+ */
 function loadWorld(path = './world/TinyRoom.gltf') {
   const loader = new GLTFLoader();
   loader.load(
@@ -153,20 +153,17 @@ function loadWorld(path = './world/TinyRoom.gltf') {
       const world = gltf.scene;
       world.userData.isWorld = true;
 
-      const box = new THREE.Box3().setFromObject(world);
+      const box  = new THREE.Box3().setFromObject(world);
       const size = box.getSize(new THREE.Vector3());
-      const center = box.getCenter(new THREE.Vector3());
 
-      // El mundo mide 680 unidades reales → queremos ~4m
-      // 4 / 680 = 0.00588... pero el VRM ya está en metros
-      // Así que la escala correcta es:
-      const scale = 2.5 / Math.max(size.x, size.z);  // → ~0.006
+      // Escalar para que el eje mayor ocupe ~2.5 m (unidades VRM = metros)
+      const scale = 2.5 / Math.max(size.x, size.z);
       world.scale.setScalar(scale);
 
       // Recentrar DESPUÉS de escalar
       box.setFromObject(world);
       const scaledCenter = box.getCenter(new THREE.Vector3());
-      const scaledMin = box.min;
+      const scaledMin    = box.min;
 
       // Centrar en X/Z, apoyar el suelo en Y=0
       world.position.set(
@@ -188,6 +185,14 @@ function loadWorld(path = './world/TinyRoom.gltf') {
   );
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// POSES CORPORALES
+// Posiciones de huesos que definen el lenguaje corporal del avatar.
+// aplicarPoseReposo() se aplica directamente al cargar; durante runtime
+// se usan poseNeutral() / poseAngry() con lerp para transiciones suaves.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** Pose de reposo inicial: brazos caídos y dedos semiencogidos (sin lerp). */
 function aplicarPoseReposo(vrm) {
   const { humanoid } = vrm;
 
@@ -203,7 +208,7 @@ function aplicarPoseReposo(vrm) {
   if (leftLower)  leftLower.rotation.z  = -0.2;
   if (rightLower) rightLower.rotation.z =  0.2;
 
-  // Dedos — misma rotación para ambas manos
+  // Dedos — cierre suave en ambas manos
   const dedos = [
     'IndexProximal', 'IndexIntermediate', 'IndexDistal',
     'MiddleProximal', 'MiddleIntermediate', 'MiddleDistal',
@@ -218,7 +223,7 @@ function aplicarPoseReposo(vrm) {
     if (R) R.rotation.z =  0.3;
   });
 
-  // Pulgares — eje distinto
+  // Pulgares — eje de rotación diferente al resto de los dedos
   const pulgares = ['ThumbProximal', 'ThumbDistal', 'ThumbMetacarpal'];
   pulgares.forEach(pulgar => {
     const L = humanoid.getNormalizedBoneNode(`left${pulgar}`);
@@ -235,6 +240,11 @@ function aplicarPoseReposo(vrm) {
 // ANIMACIÓN Y EXPRESIONES
 // ═══════════════════════════════════════════════════════════════════════════
 
+/**
+ * Resetea todas las expresiones faciales a 0 y activa la indicada al 100%.
+ * Operación atómica: solo puede haber una expresión activa a la vez.
+ * @param {string} nombre - Nombre de la expresión VRM ('happy', 'angry', etc.)
+ */
 function activarExpresion(nombre) {
   if (!currentVRM || !currentVRM.expressionManager) return;
 
@@ -258,15 +268,24 @@ function activarExpresion(nombre) {
 
 
 // ── Estado de expresiones complejas ───────────────────────────────────────
+/** @type {{ actual: string, timerReset: number|null, lerpActivo: Object, lerpRAF: number|null }} */
 const expresionState = {
-  actual: 'neutral',
+  actual:     'neutral',
   timerReset: null,
-  lerpActivo: {},   // huesos en transición: { nombreHueso: {from, to, progress} }
-  lerpRAF: null
+  lerpActivo: {},   // { [nombreHueso]: { from, to, progress, duracion } }
+  lerpRAF:    null
 };
 
-// ── Lerp suave para huesos ─────────────────────────────────────────────────
+// ── Sistema Lerp (transiciones suaves de huesos) ──────────────────────────
+// Interpola rotaciones de huesos frame a frame mediante requestAnimationFrame.
 
+/**
+ * Registra un hueso para interpolación suave hacia targetRotation.
+ * @param {object} vrm            - Instancia VRM activa.
+ * @param {string} nombreHueso    - Nombre del hueso normalizado (camelCase VRM).
+ * @param {{ x, y, z }} targetRotation - Rotación destino en radianes.
+ * @param {number} duracionMs     - Duración de la transición en ms (default: 800).
+ */
 function lerpHueso(vrm, nombreHueso, targetRotation, duracionMs = 800) {
   const hueso = vrm.humanoid.getNormalizedBoneNode(nombreHueso);
   if (!hueso) return;
@@ -283,6 +302,7 @@ function lerpHueso(vrm, nombreHueso, targetRotation, duracionMs = 800) {
   };
 }
 
+/** Tick RAF: avanza todos los lerps activos con easing easeInOut. */
 function tickLerpHuesos() {
   if (!currentVRM) return;
   const activos = expresionState.lerpActivo;
@@ -311,13 +331,15 @@ function tickLerpHuesos() {
   }
 }
 
+/** Arranca (o reinicia) el loop de interpolación de huesos. */
 function iniciarLerp() {
   if (expresionState.lerpRAF) cancelAnimationFrame(expresionState.lerpRAF);
   expresionState.lerpRAF = requestAnimationFrame(tickLerpHuesos);
 }
 
-// ── Pose neutral (brazos en reposo) ───────────────────────────────────────
+// ── Poses con transición suave ─────────────────────────────────────────────
 
+/** Transición suave de vuelta a la pose de reposo. */
 function poseNeutral(vrm) {
   lerpHueso(vrm, 'leftUpperArm',  { x: 0, y: 0, z: -1.2 });
   lerpHueso(vrm, 'rightUpperArm', { x: 0, y: 0, z:  1.2 });
@@ -329,24 +351,25 @@ function poseNeutral(vrm) {
 }
 
 // ── Pose angry ─────────────────────────────────────────────────────────────
-
+/**
+ * Brazos cruzados, cabeza levantada y girada a un lado aleatorio.
+ * Los ojos compensan el giro para mantener contacto visual con la cámara.
+ */
 function poseAngry(vrm) {
-  // Lado random: izquierda o derecha
+  // Lado aleatorio para dar variedad entre activaciones
   const lado = Math.random() < 0.5 ? 1 : -1;
 
-  // Brazos cruzados
-  // Brazo derecho encima, brazo izquierdo debajo (clásico cruce)
-  lerpHueso(vrm, 'rightUpperArm', { x:  0.3, y: -0.2, z:  0.8 });
-  lerpHueso(vrm, 'rightLowerArm', { x:  0.0, y: -1.2, z:  0.3 });
-  lerpHueso(vrm, 'leftUpperArm',  { x:  0.3, y:  0.2, z: -0.8 });
-  lerpHueso(vrm, 'leftLowerArm',  { x:  0.0, y:  1.2, z: -0.3 });
+  // Brazos cruzados: derecho encima, izquierdo debajo (cruce clásico)
+  lerpHueso(vrm, 'rightUpperArm', { x:  0.3, y: 1, z:  0 });
+  lerpHueso(vrm, 'rightLowerArm', { x:  0, y: 2, z:  0 });
+  lerpHueso(vrm, 'leftUpperArm',  { x:  0.4, y:  -1, z: 0 });
+  lerpHueso(vrm, 'leftLowerArm',  { x:  0, y:  -2, z: 0 });
 
-  // Cabeza girada y levantada al lado random
-  // pero los ojos compensan mirando a cámara (via lookAt del expressionManager)
+  // Cabeza levantada (barbilla arriba) y girada al lado aleatorio
   lerpHueso(vrm, 'neck', {
-    x: -0.15,                          // levantada (barbilla arriba)
-    y:  lado * 0.3,                    // girada al lado random
-    z:  lado * 0.05                    // leve inclinación
+    x: -0.15,        // barbilla arriba
+    y:  lado * 0.3,  // giro lateral
+    z:  lado * 0.05  // leve inclinación
   });
   lerpHueso(vrm, 'head', {
     x: -0.1,
@@ -354,18 +377,22 @@ function poseAngry(vrm) {
     z:  lado * 0.05
   });
 
-  // Ojos compensan la rotación de la cabeza mirando a cámara
+  // Ojos en dirección contraria al giro → mantienen contacto visual con la cámara
   if (vrm.expressionManager) {
-    // Mover los ojos en dirección contraria al giro de la cabeza
     miradaState.targetY = -lado * 0.2;
-    miradaState.targetX =  0.1;        // ligeramente arriba (mirada altiva)
+    miradaState.targetX =  0.1; // ligeramente arriba (mirada altiva)
   }
 
   iniciarLerp();
 }
 
-// ── Activar expresión angry completa ──────────────────────────────────────
+// ── Activar / desactivar emoción angry ────────────────────────────────────
 
+/**
+ * Activa la emoción "angry" completa: expresión facial + pose corporal + auto-reset.
+ * Pausa la animación idle de mirada durante la duración indicada.
+ * @param {number} duracionSegundos - Tiempo hasta volver a neutral (default: 10 s).
+ */
 function activarAngry(duracionSegundos = 10) {
   if (!currentVRM) return;
 
@@ -376,7 +403,7 @@ function activarAngry(duracionSegundos = 10) {
   }
 
   // Pausar mirada despreocupada
-  miradaState.activo = false;
+  miradaState.activa = false;
 
   // Expresión facial
   activarExpresion('angry');
@@ -393,6 +420,7 @@ function activarAngry(duracionSegundos = 10) {
   }, duracionSegundos * 1000);
 }
 
+/** Revierte la emoción angry: expresión neutral + pose reposo + reactiva mirada idle. */
 function desactivarAngry() {
   if (!currentVRM) return;
 
@@ -405,7 +433,7 @@ function desactivarAngry() {
   // Centrar mirada y reactivar animación
   miradaState.targetX = 0;
   miradaState.targetY = 0;
-  miradaState.activo = true;
+  miradaState.activa = true;
   programarSiguienteMirada();
 
   expresionState.actual = 'neutral';
@@ -413,6 +441,11 @@ function desactivarAngry() {
 }
 
 
+/**
+ * Rota la cabeza hacia coordenadas exactas (sin lerp).
+ * Útil para comandos externos puntuales vía WebSocket.
+ * @param {number} x @param {number} y @param {number} z
+ */
 function mirarHacia(x, y, z) {
   if (!currentVRM || !currentVRM.humanoid) return;
   
@@ -424,6 +457,11 @@ function mirarHacia(x, y, z) {
   }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// LOOP PRINCIPAL
+// Bucle de render a ~60 FPS. Solo arranca cuando el VRM está cargado.
+// ═══════════════════════════════════════════════════════════════════════════
+
 // Variable global para el tiempo de respiración
 let breathTime = 0;
 
@@ -431,22 +469,25 @@ function animate() {
   requestAnimationFrame(animate);
   
   if (currentVRM) {
-    currentVRM.update(1 / 60); // 60 FPS
+    currentVRM.update(1 / 60);
     animarRespiracion();
     animarMirada();
   }
   
   renderer.render(scene, camera);
 }
- 
+
+
+// ── Respiración ────────────────────────────────────────────────────────────
+// Movimiento sutil del pecho, columna y hombros. Se llama cada frame.
 
 function animarRespiracion() {
   if (!currentVRM) return;
   const { humanoid } = currentVRM;
 
-  breathTime += 0.008; // ← velocidad: más alto = más rápido
+  breathTime += 0.008; // velocidad del ciclo
 
-  const breath = Math.sin(breathTime) * 0.02; // ← intensidad: más alto = más pronunciado
+  const breath = Math.sin(breathTime) * 0.02; // amplitud del movimiento
 
   // Pecho sube y baja
   const chest = humanoid.getNormalizedBoneNode('chest');
@@ -467,17 +508,24 @@ function animarRespiracion() {
   if (rightShoulder) rightShoulder.rotation.z =  breath * 0.5;
 }
 
-// ── Estado de la animación ─────────────────────────────────────────────────
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ANIMACIÓN — MIRADA
+// Movimiento ocular/cefálico idle: la cabeza gira periódicamente hacia puntos
+// aleatorios y vuelve al centro. Se pausa durante emociones activas.
+// animarMirada() se llama cada frame en animate() para interpolación continua.
+// ═══════════════════════════════════════════════════════════════════════════
+
 const miradaState = {
-  activa: false,
-  targetX: 0,      // objetivo arriba/abajo
-  targetY: 0,      // objetivo izquierda/derecha
-  currentX: 0,     // posición actual interpolada
+  activa:   false, // true = animación idle activa
+  targetX:  0,     // objetivo rotación cabeza (arriba/abajo)
+  targetY:  0,     // objetivo rotación cabeza (izq/dcha)
+  currentX: 0,     // posición interpolada actual
   currentY: 0,
-  timer: null
+  timer:    null
 };
 
-// ── Helpers ────────────────────────────────────────────────────────────────
+// ── Helpers de ángulos ──────────────────────────────────────────────────────
 
 function randomEntre(min, max) {
   return Math.random() * (max - min) + min;
@@ -493,8 +541,9 @@ function gradosARadianes(grados) {
   return grados * (Math.PI / 180);
 }
 
-// ── Animación ──────────────────────────────────────────────────────────────
+// ── Lógica de programación ──────────────────────────────────────────────────
 
+/** Programa el siguiente movimiento de mirada (se llama recursivamente). */
 function programarSiguienteMirada() {
   if (!miradaState.activa) return;
 
@@ -524,7 +573,6 @@ function animacion_mirardespreocupada(activar = true) {
   miradaState.activa = activar;
 
   if (!activar) {
-    // Detener — limpiar timer y volver al centro suavemente
     if (miradaState.timer) clearTimeout(miradaState.timer);
     miradaState.targetX = 0;
     miradaState.targetY = 0;
@@ -536,16 +584,14 @@ function animacion_mirardespreocupada(activar = true) {
   programarSiguienteMirada();
 }
 
-// ── En animate() — interpolar suavemente hacia el objetivo ─────────────────
-// Llama esto dentro de animate(), igual que animarRespiracion()
-
+/** Interpola suavemente la cabeza hacia miradaState.target. Se llama en animate(). */
 function animarMirada() {
   if (!currentVRM) return;
 
   const head = currentVRM.humanoid.getNormalizedBoneNode('head');
   if (!head) return;
 
-  // Lerp suave hacia el objetivo (0.02 = lento y natural)
+  // Factor 0.02 = movimiento lento y natural
   miradaState.currentX += (miradaState.targetX - miradaState.currentX) * 0.02;
   miradaState.currentY += (miradaState.targetY - miradaState.currentY) * 0.02;
 
@@ -554,31 +600,30 @@ function animarMirada() {
 }
 
 
+// ═══════════════════════════════════════════════════════════════════════════
+// ANIMACIÓN — PARPADEO
+// Parpadeo autónomo aleatorio con doble parpadeo ocasional (15 % de casos).
+// ═══════════════════════════════════════════════════════════════════════════
 
-// ── Estado del parpadeo ────────────────────────────────────────────────────
 const parpadeoState = {
   activo: true,
-  timer: null
+  timer:  null
 };
 
 function programarSiguienteParpadeo() {
   if (!parpadeoState.activo) return;
 
-  // Parpadeo cada 4-8 segundos (humano real: 3-5s)
-  const espera = randomEntre(4000, 8000);
-
+  // Intervalo humano real: 3-5 s. Usamos 4-8 s para ser más sutil.
   parpadeoState.timer = setTimeout(async () => {
     await ejecutarParpadeo();
     programarSiguienteParpadeo();
-  }, espera);
+  }, randomEntre(4000, 8000));
 }
 
 async function ejecutarParpadeo() {
   if (!currentVRM?.expressionManager) return;
-  const exp = currentVRM.expressionManager;
-
-  // A veces parpadea doble (como los humanos)
-  const doble = Math.random() < 0.15;
+  const exp   = currentVRM.expressionManager;
+  const doble = Math.random() < 0.15; // doble parpadeo ocasional
 
   await cerrarOjos(exp);
 
@@ -595,13 +640,13 @@ function cerrarOjos(exp) {
   return new Promise(resolve => {
     let v = 0;
     const intervalo = setInterval(() => {
-      v = Math.min(v + 0.25, 1.0);  // ← velocidad cierre
+      v = Math.min(v + 0.25, 1.0);
       try { exp.setValue('blink', v); } catch(e) {}
       if (v >= 1.0) {
         clearInterval(intervalo);
         resolve();
       }
-    }, 16); // ~60fps
+    }, 16);
   });
 }
 
@@ -609,7 +654,7 @@ function abrirOjos(exp) {
   return new Promise(resolve => {
     let v = 1.0;
     const intervalo = setInterval(() => {
-      v = Math.max(v - 0.22, 0);    // ← velocidad apertura (más lento que el cierre)
+      v = Math.max(v - 0.22, 0); // apertura más lenta que el cierre
       try { exp.setValue('blink', v); } catch(e) {}
       if (v <= 0) {
         clearInterval(intervalo);
@@ -623,6 +668,10 @@ function esperar(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+/**
+ * Activa o desactiva la animación de parpadeo autónomo.
+ * @param {boolean} activar
+ */
 function animacion_parpadeo(activar = true) {
   parpadeoState.activo = activar;
 
@@ -647,6 +696,8 @@ function animacion_parpadeo(activar = true) {
 
 // ═══════════════════════════════════════════════════════════════════════════
 // WEBSOCKET
+// Conexión al daemon Python. Reconexión automática cada 3 s si se pierde.
+// El renderer solo recibe comandos; nunca envía datos al daemon.
 // ═══════════════════════════════════════════════════════════════════════════
 
 function connectWebSocket() {
@@ -690,7 +741,23 @@ function connectWebSocket() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// COMANDO EJECUTOR
+// COMANDOS
+// Despacha los mensajes JSON recibidos por WebSocket a las funciones
+// correspondientes. Estructura del mensaje: { accion, parametros }
+//
+// Acciones disponibles:
+//   emocion_happy / sad / relaxed / surprised / neutral  → expresión simple
+//   emocion_angry          → expresión + pose + auto-reset (parametros.duracion)
+//   hablar                 → alias de emocion_happy
+//   escuchar               → alias de emocion_neutral
+//   alerta                 → alias de emocion_surprised
+//   pose_reposo            → aplica pose corporal de reposo
+//   mirar                  → rota cabeza a (x, y, z) exactos
+//   mirada_despreocupada   → activa/desactiva animación idle de mirada
+//   parpadeo               → activa/desactiva parpadeo autónomo
+//   reset                  → neutral + mirada centrada
+//   world                  → carga escenario desde parametros.path
+//   world_rotation         → rota el escenario parametros.y radianes
 // ═══════════════════════════════════════════════════════════════════════════
 
 function ejecutarComando(comando) {
@@ -716,8 +783,7 @@ function ejecutarComando(comando) {
       break;
       
     case 'emocion_angry':
-      const duracion = parametros.duracion ?? 20;
-      activarExpresion('angry');
+      activarAngry(parametros.duracion ?? 20);
       break;
       
     case 'emocion_sad':
@@ -732,11 +798,12 @@ function ejecutarComando(comando) {
       if (currentVRM) aplicarPoseReposo(currentVRM);
       break;
       
-    case 'mirar':
+    case 'mirar': {
       const { x = 0, y = 0, z = 0 } = parametros;
       mirarHacia(x, y, z);
       log(`Mirando hacia: (${x}, ${y}, ${z})`);
       break;
+    }
 
     case 'mirada_despreocupada':
       animacion_mirardespreocupada(parametros.activa ?? true);
@@ -752,21 +819,22 @@ function ejecutarComando(comando) {
       log('Reset ejecutado');
       break;
 
-    case 'world':
+    case 'world': {
       const { path } = parametros;
       if (path) {
-        // Limpiar mundo anterior
         scene.children
           .filter(obj => obj.userData.isWorld)
           .forEach(obj => scene.remove(obj));
         loadWorld(path);
       }
       break;
+    }
     
-    case 'world_rotation':
+    case 'world_rotation': {
       const worldObj = scene.children.find(obj => obj.userData.isWorld);
       if (worldObj) worldObj.rotation.y = parametros.y;
       break;
+    }
       
     default:
       log(`⚠ Acción desconocida: ${accion}`);
@@ -775,6 +843,7 @@ function ejecutarComando(comando) {
 
 // ═══════════════════════════════════════════════════════════════════════════
 // UI HELPERS
+// Actualización del indicador de estado y del log de debug en pantalla.
 // ═══════════════════════════════════════════════════════════════════════════
 
 function updateStatus(message, connected) {
@@ -800,7 +869,8 @@ function log(message) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// INICIO
+// INICIALIZACIÓN
+// Punto de entrada: arranca todos los subsistemas cuando la página está lista.
 // ═══════════════════════════════════════════════════════════════════════════
 
 window.addEventListener('load', () => {
