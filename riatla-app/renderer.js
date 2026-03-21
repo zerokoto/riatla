@@ -273,23 +273,17 @@ function loadWorld(nombre = 'TinyRoom') {
 
 const OBJECTS = {
   libro: {
-    path:     './props/book1.glb',
-    scale:    0.001,
-    position: { x: 0.4, y: 1.2, z: 0.5 },  // delante del avatar, a su altura
-    rotation: { x: 0,   y: 180,   z: 0   }
-  },
-  libro2: {
-    path:     './props/book2.glb',
+    path:     './props/book.glb',
     scale:    0.05,
-    position: { x: 0.35, y: 1.2, z: 0.5 },  // delante del avatar, a su altura
-    rotation: { x: 0,   y: 180,   z: 0   }
+    position: { x: 0.2, y: 1.1, z: 0.2 },  // delante del avatar, a su altura
+    rotation: { x: 0,   y: Math.PI/4 + Math.PI,   z: 0 }  // rotación para que quede abierto y legible
   },
-  libro3: {
-    path:     './props/book3.glb',
-    scale:    1,
-    position: { x: 0.4, y: 1.2, z: 0.5 },  // delante del avatar, a su altura
-    rotation: { x: 0,   y: 180,   z: 0   }
-  },
+  musica: {
+    path:     './props/music.glb',
+    scale:    0.003,
+    position: { x: 0, y: 1.5, z: 0 },  // delante del avatar, a su altura
+    rotation: { x: 0,   y: 0,   z: 0 }  // rotación para que quede abierto y legible
+  }
 
 };
 
@@ -321,17 +315,35 @@ function addObjeto(nombre) {
       obj.position.set(config.position.x, config.position.y, config.position.z);
       obj.rotation.set(config.rotation.x, config.rotation.y, config.rotation.z);
 
+            // ── Animaciones del GLB ──────────────────────────────────────────────
+      if (gltf.animations && gltf.animations.length > 0) {
+        const mixer = new THREE.AnimationMixer(obj);
+        gltf.animations.forEach(clip => {
+          mixer.clipAction(clip).play();
+        });
+        obj.userData.mixer = mixer;
+        log(`✓ Objeto ${nombre}: ${gltf.animations.length} animación(es)`);
+      }
+
+      config._seed = Math.random() * Math.PI * 2;
       scene.add(obj);
       objetosActivos[nombre] = obj;
       log(`✓ Objeto añadido: ${nombre}`);
+
 
       // Si es un libro, pausar mirada y centrarla en el libro
       if (nombre.startsWith('libro')) {
         miradaState.mirandoLibro = true;
         if (miradaState.timer) clearTimeout(miradaState.timer);
         // Mirar ligeramente hacia abajo y hacia donde está el libro
-        miradaState.targetX =  0.15;  // ligeramente abajo (leyendo)
-        miradaState.targetY = -0.1;   // hacia su derecha donde está el libro
+        miradaState.targetX =  0.2;  // ligeramente abajo (leyendo)
+        miradaState.targetY = 0.2;   // hacia su izq donde está el libro
+
+      // Brazo izquierdo levantado sosteniendo el libro
+      lerpHueso(currentVRM, 'leftUpperArm', { x:  Math.PI/10, y: -Math.PI/10, z: -Math.PI/4  });
+      lerpHueso(currentVRM, 'leftLowerArm', { x:  0,          y:  -Math.PI/2, z: 0 }); 
+      lerpHueso(currentVRM, 'leftHand',     { x: -Math.PI/2,           y:  0,          z:  0 });
+      iniciarLerp();
       }
     },
     undefined,
@@ -345,6 +357,11 @@ function removeObjeto(nombre) {
     log(`⚠ Objeto no activo: ${nombre}`);
     return;
   }
+
+  if (obj.userData.mixer) {
+    obj.userData.mixer.stopAllAction();
+    obj.userData.mixer.uncacheRoot(obj);
+  }
   scene.remove(obj);
   delete objetosActivos[nombre];
   log(`✓ Objeto eliminado: ${nombre}`);
@@ -353,6 +370,13 @@ function removeObjeto(nombre) {
     const quedanLibros = Object.keys(objetosActivos).some(n => n.startsWith('libro'));
     if (!quedanLibros) {
       miradaState.mirandoLibro = false;
+
+      // Devolver brazo a pose de reposo
+      lerpHueso(currentVRM, 'leftUpperArm', { x: 0, y: 0, z: -1.2 });
+      lerpHueso(currentVRM, 'leftLowerArm', { x: 0, y: 0, z: -0.2 });
+      lerpHueso(currentVRM, 'leftHand',     { x: 0, y: 0, z:  0   });
+      iniciarLerp();
+
       // Reactivar mirada despreocupada solo si no hay emoción activa
       if (expresionState.actual === 'neutral') {
         miradaState.targetX = 0;
@@ -874,6 +898,11 @@ function animarObjetos() {
   Object.entries(objetosActivos).forEach(([nombre, obj]) => {
     const config = OBJECTS[nombre];
     if (!config) return;
+
+    // Actualizar animaciones del GLB
+    if (obj.userData.mixer) {
+      obj.userData.mixer.update(1 / 60);
+    }
 
     const seed = config._seed ?? 0;
 
