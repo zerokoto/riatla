@@ -372,6 +372,9 @@ function addObjeto(nombre) {
         miradaState.targetX =  0.2;  // ligeramente abajo (leyendo)
         miradaState.targetY = 0.2;   // hacia su izq donde está el libro
 
+        // Pausar animación de muñeca izquierda si está bailando
+        musicaState._brazoIzqBloqueado = true;  // ← añadir
+
         // Esperar a que cualquier pose anterior termine (lerp ~800ms)
         setTimeout(() => {
           if (!objetosActivos[nombre]) return; // por si lo quitaron antes
@@ -406,6 +409,7 @@ function removeObjeto(nombre) {
     const quedanLibros = Object.keys(objetosActivos).some(n => n.startsWith('libro'));
     if (!quedanLibros) {
       miradaState.mirandoLibro = false;
+      musicaState._brazoIzqBloqueado = false; 
 
       // Devolver brazo a pose de reposo
       lerpHueso(currentVRM, 'leftUpperArm', { x: 0, y: 0, z: -1.2 });
@@ -792,7 +796,7 @@ function poseRelaxed(vrm) {
   lerpHueso(vrm, 'rightLowerArm', { x: 0, y: 0, z:  0   });
   lerpHueso(vrm, 'leftHand',      { x: 0, y: 0, z:  0   }); // ← reset mano de lectura
   lerpHueso(vrm, 'rightHand',     { x: 0, y: 0, z:  0   });
-  
+
   iniciarLerp();
   removeAllObjetos();
 }
@@ -810,11 +814,21 @@ function activarRelaxed(duracionSegundos = 20) {
     expresionState.timerReset = null;
   }
 
-  // Si hay música en modo metal, cambiar a normal
   if (musicaState.activa && musicaState.modo === 'metal') {
     musicaState.modo = 'normal';
-    log('Headbang pausado por relaxed');
   }
+
+  // Resetear mirada antes de bloquear
+  miradaState.targetX  = 0;
+  miradaState.targetY  = 0;
+  miradaState.currentX = 0;  // ← forzar reset inmediato
+  miradaState.currentY = 0;
+  miradaState.bloqueada = true;  // ← bloquear durante el lerp
+
+  // Desbloquear cuando el lerp termine (~800ms)
+  setTimeout(() => {
+    miradaState.bloqueada = false;
+  }, 900);
 
   activarExpresion('relaxed');
   poseRelaxed(currentVRM);
@@ -830,9 +844,15 @@ function activarRelaxed(duracionSegundos = 20) {
 /** Revierte la emoción relaxed: expresión neutral + pose reposo. */
 function desactivarRelaxed() {
   if (!currentVRM) return;
-
   activarExpresion('neutral');
   poseNeutral(currentVRM);
+
+  // Resetear completamente la mirada antes de reactivar
+  miradaState.targetX  = 0;
+  miradaState.targetY  = 0;
+  miradaState.currentX = 0;
+  miradaState.currentY = 0;
+  miradaState.bloqueada = false;
 
   expresionState.actual = 'neutral';
   log('Expresión: neutral (desde relaxed)');
@@ -1078,7 +1098,8 @@ const miradaState = {
   currentX: 0,     // posición interpolada actual
   currentY: 0,
   timer:    null,
-  mirandoLibro: false
+  mirandoLibro: false,
+  bloqueada:    false
 };
 
 // ── Helpers de ángulos ──────────────────────────────────────────────────────
@@ -1143,17 +1164,16 @@ function animacion_mirardespreocupada(activar = true) {
 /** Interpola suavemente la cabeza hacia miradaState.target. Se llama en animate(). */
 function animarMirada() {
   if (!currentVRM) return;
+  if (miradaState.bloqueada) return;  // ← añadir al inicio
 
   const head = currentVRM.humanoid.getNormalizedBoneNode('head');
   if (!head) return;
 
-  // Si hay libro activo, pausar animación idle pero mantener interpolación
   if (miradaState.mirandoLibro && miradaState.activa) {
     miradaState.activa = false;
     if (miradaState.timer) clearTimeout(miradaState.timer);
   }
 
-  // Factor 0.02 = movimiento lento y natural
   miradaState.currentX += (miradaState.targetX - miradaState.currentX) * 0.02;
   miradaState.currentY += (miradaState.targetY - miradaState.currentY) * 0.02;
 
@@ -1342,10 +1362,10 @@ function animarMusica() {
   const chest = humanoid.getNormalizedBoneNode('chest');
   if (chest) chest.rotation.z = -Math.sin(t * 0.9 + 0.4) * 0.02 * mod3 * amp;
 
-  // ── Brazos superiores ────────────────────────────────────────────────────
-  const swayArm = Math.sin(t + Math.PI);  // frecuencia fija
-  if (leftArm) {
-    leftArm.rotation.z = -1.2 + swayArm              * 0.03  * mod1 * amp;
+  // ── Brazos superiores ─────────────────────────────────────────────────────
+  const swayArm = Math.sin(t + Math.PI);
+  if (leftArm && !musicaState._brazoIzqBloqueado) {  // ← condición
+    leftArm.rotation.z = -1.2 + swayArm               * 0.03  * mod1 * amp;
     leftArm.rotation.x =        Math.sin(t * 2 + 1.0) * 0.015 * mod2 * amp;
   }
   if (rightArm) {
@@ -1354,16 +1374,18 @@ function animarMusica() {
   }
 
   // ── Antebrazos ────────────────────────────────────────────────────────────
-  const swayLower = Math.sin(t * 1.5 + 0.5);  // frecuencia fija
-  if (leftLower)  leftLower.rotation.z  = -0.2 + swayLower * 0.02 * mod2 * amp;
-  if (rightLower) rightLower.rotation.z =  0.2 - swayLower * 0.02 * mod2 * amp;
+  const swayLower = Math.sin(t * 1.5 + 0.5);
+  if (leftLower && !musicaState._brazoIzqBloqueado) {  // ← condición
+    leftLower.rotation.z = -0.2 + swayLower * 0.02 * mod2 * amp;
+  }
+  if (rightLower) {
+    rightLower.rotation.z = 0.2 - swayLower * 0.02 * mod2 * amp;
+  }
 
-  // ── Muñecas: al doble de frecuencia, fase aleatoria ──────────────────────
-  const leftHand  = humanoid.getNormalizedBoneNode('leftHand');
-  const rightHand = humanoid.getNormalizedBoneNode('rightHand');
-  if (leftHand) {
-    leftHand.rotation.z = Math.sin(t * 2 + 1.2 + r1)    * 0.03 * mod1 * amp;
-    leftHand.rotation.x = Math.sin(t * 1.4 + r2)        * 0.02 * mod2 * amp;
+  // ── Muñecas ───────────────────────────────────────────────────────────────
+  if (leftHand && !musicaState._brazoIzqBloqueado) {  // ← condición
+    leftHand.rotation.z = Math.sin(t * 2 + 1.2 + r1) * 0.03 * mod1 * amp;
+    leftHand.rotation.x = Math.sin(t * 1.4 + r2)      * 0.02 * mod2 * amp;
   }
   if (rightHand) {
     rightHand.rotation.z = Math.sin(t * 2 + r2)         * 0.03 * mod1 * amp;
