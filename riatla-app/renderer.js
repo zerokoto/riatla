@@ -795,6 +795,12 @@ function activarRelaxed(duracionSegundos = 20) {
     expresionState.timerReset = null;
   }
 
+  // Si hay música en modo metal, cambiar a normal
+  if (musicaState.activa && musicaState.modo === 'metal') {
+    musicaState.modo = 'normal';
+    log('Headbang pausado por relaxed');
+  }
+
   activarExpresion('relaxed');
   poseRelaxed(currentVRM);
 
@@ -898,6 +904,44 @@ function mirarHacia(x, y, z) {
     head.rotation.z = z;
   }
 }
+
+/**
+ * Mueve uno o varios huesos a rotaciones indicadas.
+ * Acepta lerp suave o asignación directa.
+ * 
+ * Payload WebSocket:
+ * { "accion": "hueso",
+ *   "parametros": {
+ *     "huesos": [
+ *       { "nombre": "head",  "x": 0.1, "y": -0.2, "z": 0 },
+ *       { "nombre": "neck",  "x": 0.05, "y": -0.1, "z": 0 }
+ *     ],
+ *     "duracion": 500,   // ms, opcional — default 800
+ *     "lerp": true       // opcional — default true
+ *   }
+ * }
+ */
+function moverHuesos(huesos, duracionMs = 800, usarLerp = true) {
+  if (!currentVRM) return;
+
+  huesos.forEach(({ nombre, x = 0, y = 0, z = 0 }) => {
+    if (usarLerp) {
+      lerpHueso(currentVRM, nombre, { x, y, z }, duracionMs);
+    } else {
+      // Asignación directa sin interpolación
+      const hueso = currentVRM.humanoid.getNormalizedBoneNode(nombre);
+      if (hueso) {
+        hueso.rotation.x = x;
+        hueso.rotation.y = y;
+        hueso.rotation.z = z;
+      }
+    }
+  });
+
+  if (usarLerp) iniciarLerp();
+  log(`Huesos: ${huesos.map(h => h.nombre).join(', ')}`);
+}
+
 
 // ═══════════════════════════════════════════════════════════════════════════
 // LOOP PRINCIPAL
@@ -1540,6 +1584,12 @@ function ejecutarComando(comando) {
       if (accionObj === 'remove') removeObjeto(nombre);
       else if (accionObj === 'clear') removeAllObjetos();
       else addObjeto(nombre);
+      break;
+    }
+
+    case 'hueso': {
+      const { huesos = [], duracion = 800, lerp = true } = parametros;
+      if (huesos.length > 0) moverHuesos(huesos, duracion, lerp);
       break;
     }
       
