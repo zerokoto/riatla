@@ -25,6 +25,7 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1024,
     height: 768,
+    fullscreen: true,
     webPreferences: {
       nodeIntegration: false,
       preload: path.join(__dirname, 'preload.js')
@@ -40,7 +41,7 @@ function createWindow() {
     log('ERROR cargando: ' + err.message);
   });
 
-  mainWindow.webContents.openDevTools();
+  //mainWindow.webContents.openDevTools();
   log('DevTools abierto');
 
   mainWindow.on('closed', () => {

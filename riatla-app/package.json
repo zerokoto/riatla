@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "Cliente Electron para avatar VRM Riatla con control vía WebSocket",
   "author": "Riatla Team",
-  "main": "main-log.js",
+  "main": "electron-main-log.js",
   "homepage": "./",
   "scripts": {
     "start": "electron .",
