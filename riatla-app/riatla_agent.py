@@ -1,40 +1,35 @@
 """
-riatla_agent.py — Agente LLM para Riatla
-=========================================
-Agente autónomo que observa Home Assistant y decide qué hacer
-con el avatar Riatla y con el hogar.
-
-Modos de operación:
-  - Reactivo:   actúa cuando llega un evento relevante de HA via MQTT
-  - Periódico:  revisa el contexto cada INTERVALO_REVISION segundos
-
-Proveedores LLM soportados (cambiar LLM_PROVIDER):
-  - "openai"    → GPT-4o, GPT-4o-mini
-  - "anthropic" → Claude Sonnet, Haiku
-  - "ollama"    → modelos locales (llama3, mistral...)
-
-Dependencias:
-    pip install paho-mqtt openai anthropic requests
+riatla_agent.py — Agente LLM para Riatla (API REST + SSE)
+==========================================================
+Usa la API de Home Assistant en lugar de MQTT para leer estados.
+- Server-Sent Events (SSE) para eventos en tiempo real
+- REST API para consultar estados actuales
+- Revisión periódica cada INTERVALO_REVISION segundos
 """
 
 import json
 import time
 import threading
 import requests
+import websocket
 import paho.mqtt.client as mqtt
 from datetime import datetime
 from collections import deque
-
 from dotenv import load_dotenv
 import os
+
 load_dotenv()
+
+# ── Configuración ──────────────────────────────────────────────────────────────
 
 MQTT_HOST = os.getenv("MQTT_HOST", "192.168.1.126")
 MQTT_PORT = int(os.getenv("MQTT_PORT", 1883))
 MQTT_USER = os.getenv("MQTT_USER")
 MQTT_PASS = os.getenv("MQTT_PASS")
-HA_URL    = os.getenv("HA_URL")
+HA_URL    = os.getenv("HA_URL", "http://192.168.1.126:8123")
 HA_TOKEN  = os.getenv("HA_TOKEN")
+
+LLM_PROVIDER = "openai"
 
 LLM_CONFIG = {
     "openai": {
@@ -53,11 +48,66 @@ LLM_CONFIG = {
     }
 }
 
-INTERVALO_REVISION = 300   # segundos entre revisiones periódicas (5 min)
-MAX_HISTORIAL_HA   = 50    # eventos HA a recordar
-MAX_HISTORIAL_CONV = 20    # turnos de conversación a recordar
+INTERVALO_REVISION = 2
 
-# ── Preferencias del usuario (hardcodeadas) ────────────────────────────────────
+MAX_HISTORIAL_HA   = 50
+MAX_HISTORIAL_CONV = 20
+
+# ── Control de cambios ─────────────────────────────────────────────────────────
+
+_ultimo_snapshot    = {}   # contexto en la última revisión periódica
+_cambios_pendientes = []   # cambios desde la última revisión periódica
+_ultima_revision    = 0    # timestamp de la última revisión periódica
+
+# ── Entidades de interés ───────────────────────────────────────────────────────
+# Solo estas entidades se monitorizan — filtra todo lo demás
+
+ENTIDADES_MONITORIZAR = {
+    # Presencia
+    "binary_sensor.grupopresenciacocina",
+    "binary_sensor.grupopresenciadormitorio",
+    "binary_sensor.grupopresenciaestudiokevin",
+    "binary_sensor.grupopresenciasalon",
+    "binary_sensor.puerta_entrada_contact",
+    "binary_sensor.sensor_humo_smoke",
+    "binary_sensor.sensor_inundacion_cocina_water_leak",
+    # Personas
+    "person.kevin",
+    "person.sandra",
+    # Luces
+    "light.salon",
+    "light.habitacion",
+    "light.estudio",
+    "light.luz_entrada_luz",
+    # Media
+    "media_player.havoice_estudio_media_player_2",
+    # Alarma
+    "alarm_control_panel.alarmo",
+    # Enchufes
+    "switch.socket_proyector_switch"
+}
+
+# Entidades reactivas — disparan decisión inmediata al cambiar
+ENTIDADES_REACTIVAS = {
+    "binary_sensor.grupopresenciacocina",
+    "binary_sensor.grupopresenciadormitorio",
+    "binary_sensor.grupopresenciaestudiokevin",
+    "binary_sensor.grupopresenciasalon",
+    "person.kevin",
+    "person.sandra",
+    "alarm_control_panel.alarmo",
+    "media_player.havoice_estudio_media_player_2",
+}
+
+# ── Estado interno ─────────────────────────────────────────────────────────────
+
+contexto_ha    = {}
+historial_ha   = deque(maxlen=MAX_HISTORIAL_HA)
+historial_conv = deque(maxlen=MAX_HISTORIAL_CONV)
+_mqtt_client   = None
+_lock          = threading.Lock()
+
+# ── Preferencias ───────────────────────────────────────────────────────────────
 
 PREFERENCIAS_USUARIO = """
 - El usuario se llama Kevin y vive en Alcalá de Henares, España
@@ -71,67 +121,108 @@ PREFERENCIAS_USUARIO = """
 - En días de trabajo el avatar debe estar atento a las alertas del hogar
 """
 
-# ── Topics MQTT ────────────────────────────────────────────────────────────────
+ENTIDADES_HA = """
 
-TOPIC_HA_ALL  = "homeassistant/#"
-TOPIC_RIATLA  = "riatla/{}"
+ENTIDADES DISPONIBLES EN HOME ASSISTANT (usa exactamente estos IDs, no inventes otros):
 
-# Eventos de HA que disparan acción reactiva inmediata
-EVENTOS_REACTIVOS = {
-    "binary_sensor",   # movimiento, puertas, ventanas
-    "alarm_control_panel",
-    "person",          # presencia
-    "media_player",    # música, TV
-}
+Luces:
+  light.salon, light.dormitorio,
+  light.estudio, light.entrada, light.luz_entrada_luz
 
-# ── Estado interno ─────────────────────────────────────────────────────────────
+Media player:
+  media_player.havoice_estudio_media_player_2 (idle = musica apagada, playing = musica sonando; solo importa si hay actividad en estudio)
 
-contexto_ha    = {}                        # estado actual de entidades
-historial_ha   = deque(maxlen=MAX_HISTORIAL_HA)   # eventos recientes
-historial_conv = deque(maxlen=MAX_HISTORIAL_CONV)  # conversación con el LLM
-_mqtt_client   = None
-_lock          = threading.Lock()
+Alarma:
+  alarm_control_panel.alarmo
 
-# ── Abstracción LLM ────────────────────────────────────────────────────────────
+Personas:
+  person.kevin, person.sandra
 
-def llm_completar(mensajes: list) -> str:
-    """
-    Envía mensajes al LLM configurado y devuelve la respuesta como string.
-    Cambiar LLM_PROVIDER en la configuración cambia el proveedor automáticamente.
-    """
-    config = LLM_CONFIG[LLM_PROVIDER]
+Enchufes:
+  switch.socket_proyector_switch
 
-    if LLM_PROVIDER in ("openai", "ollama"):
-        from openai import OpenAI
-        kwargs = {"api_key": config["api_key"]}
-        if config.get("base_url"):
-            kwargs["base_url"] = config["base_url"]
-        client = OpenAI(**kwargs)
-        respuesta = client.chat.completions.create(
-            model=config["model"],
-            messages=mensajes,
-            response_format={"type": "json_object"},
-            temperature=0.4
-        )
-        return respuesta.choices[0].message.content
+Presencia (binary_sensor — on=presente, off=ausente):
+  binary_sensor.grupopresenciacocina
+  binary_sensor.grupopresenciadormitorio
+  binary_sensor.grupopresenciaestudiokevin
+  binary_sensor.grupopresenciasalon
 
-    elif LLM_PROVIDER == "anthropic":
-        import anthropic
-        client = anthropic.Anthropic(api_key=config["api_key"])
-        # Separar system del resto de mensajes (Anthropic lo requiere aparte)
-        system  = next((m["content"] for m in mensajes if m["role"] == "system"), "")
-        msgs    = [m for m in mensajes if m["role"] != "system"]
-        respuesta = client.messages.create(
-            model=config["model"],
-            max_tokens=1024,
-            system=system,
-            messages=msgs
-        )
-        return respuesta.content[0].text
+AREAS EXISTENTES EN HA:
 
-    raise ValueError(f"Proveedor LLM desconocido: {LLM_PROVIDER}")
+Cocina:
+    - binary_sensor.grupopresenciacocina
+    - binary_sensor.sensor_inundacion_cocina_water_leak
+    - binary_sensor.sensor_humo_smoke
 
-# ── Sistema de prompts ─────────────────────────────────────────────────────────
+Dormitorio:
+    - binary_sensor.grupopresenciadormitorio
+    - light.dormitorio
+
+Estudio:
+    -binary_sensor.grupopresenciaestudiokevin
+    - light.estudio
+    - media_player.havoice_estudio_media_player_2
+
+Salón:
+    - binary_sensor.grupopresenciasalon
+    - light.salon
+    - switch.socket_proyector_switch
+
+Entrada:
+    - binary_sensor.puerta_entrada_contact
+    - light.luz_entrada_luz
+    - light.entrada
+
+ARQUITECTRURA DE CASA:
+    De [Entrada] se puede llegar a [Salón] y [Cocina]
+    De [Salón] se puede llegar a [Dormitorio] y [Estudio] o volver a [Entrada]
+    De [Cocina] se puede volver a [Entrada]
+    De [Estudio] se puede llegar a [Dormitorio] o volver a [Salón]
+    De [Dormitorio] se puede llegar a [Estudio] o volver a [Salón]
+
+
+
+REGLA CRÍTICA: Si no encuentras el entity_id exacto en esta lista, NO ejecutes la acción de HA.
+
+ACCIONES DISPONIBLES PARA RIATLA (tipo: "riatla" — NO son servicios de HA):
+- topic "emocion":      {"emocion": "happy", "duracion": 15}
+- topic "world":        {"nombre": "TinyRoom"}
+- topic "objeto":       {"objeto": "musica", "accion": "add"}
+- topic "world/musica": {"estado": "on", "modo": "normal"}  ← esto es Riatla, NO HA
+- topic "world/luz":    {"estado": "on"}                    ← esto es Riatla, NO HA
+- topic "hueso":        {"huesos": [...], "duracion": 800}
+
+ACCIONES DISPONIBLES PARA HOME ASSISTANT (tipo: "ha" — solo entidades reales):
+- dominio "light",   servicio "turn_on"/"turn_off"
+- dominio "media_player", servicio "media_pause"/"media_play"/"media_stop"
+- dominio "alarm_control_panel", servicio "alarm_arm_away"/"alarm_disarm"
+- dominio "switch",  servicio "turn_on"/"turn_off"
+
+NUNCA uses tipo "ha" para acciones de Riatla como world/musica o world/luz.
+
+
+"""
+
+PREFERENCIAS_USUARIO = """
+- El usuario se llama Kevin y vive en Alcalá de Henares, España
+- Tiene una esposa llamada Sandra
+- Tiene hurones como mascotas que habitan en el Salón
+- Le gusta la música metal y los juegos de mesa
+- Cuando hay música activa en casa le gusta que el avatar baile
+- Si es tarde (>22h) o temprano (<8h) el avatar debe ser más tranquilo o irse a dormir si no hay actividad
+- Si es de día y no hay actividad, el avatar se deberá poner a leer
+- Cuando alguien llega a casa el avatar debe mostrarse relajado
+- EFICIENCIA ENERGÉTICA: Si una luz está encendida pero el sensor de presencia
+  de esa habitación lleva más de 2 minutos en off, apagar la luz automáticamente.
+- EFICIENCIA ENERGÉTICA: Si no hay nadie en casa, el avatar se pondrá a dormir y apagará todas las luces y enchufes no esenciales.
+- EFICIENCIA ENERGÉTICA: Si un AREA deja de tener presencia, revisar si se debe parar la música o apagar el proyector.
+- Mapeo de luces y presencia:
+    light.habitacion  ↔  binary_sensor.grupopresenciadormitorio
+    light.salon       ↔  binary_sensor.grupopresenciasalon
+    light.cocina      ↔  binary_sensor.grupopresenciacocina
+    light.estudio     ↔  binary_sensor.grupopresenciaestudiokevin
+"""
+
 
 SYSTEM_PROMPT = f"""
 Eres el cerebro de Riatla, un avatar VTuber animado que vive en el hogar de Kevin
@@ -151,18 +242,18 @@ ACCIONES DISPONIBLES PARA RIATLA:
 - world/luz: cambiar iluminación ("on"/"off")
 - hueso: mover huesos del avatar con rotaciones precisas
 
-ACCIONES DISPONIBLES PARA HOME ASSISTANT:
-- Encender/apagar luces: dominio "light", servicio "turn_on"/"turn_off"
-- Control de música: dominio "media_player", servicio "play_media"/"pause"
-- Alarma: dominio "alarm_control_panel", servicio "alarm_arm_away"/"alarm_disarm"
-- Scripts HA: dominio "script", servicio nombre_del_script
+{ENTIDADES_HA}
 
 REGLAS:
 1. Responde SIEMPRE con JSON válido con la estructura indicada
 2. Solo incluye acciones que tengan sentido dado el contexto
-3. Si no hay nada relevante que hacer, devuelve acciones vacías
-4. Sé sutil — no cambies el avatar constantemente, solo cuando sea relevante
-5. Prioriza el bienestar y las preferencias de Kevin
+3. Si el estado ya era así antes (música ya sonaba, personas ya estaban), NO repitas la misma acción
+4. Si no hay nada relevante que hacer, devuelve acciones vacías
+5. Sé sutil — no cambies el avatar constantemente, solo cuando sea relevante
+6. Prioriza el bienestar y las preferencias de Kevin
+7. Si una luz está encendida y su sensor de presencia asociado está en "off",
+   apaga la luz con tipo "ha", dominio "light", servicio "turn_off"
+8. Comprueba siempre la coherencia luz/presencia antes de responder
 
 ESTRUCTURA DE RESPUESTA (JSON estricto):
 {{
@@ -183,93 +274,414 @@ ESTRUCTURA DE RESPUESTA (JSON estricto):
 }}
 """
 
-def construir_prompt_usuario(motivo: str) -> str:
-    """Construye el mensaje de usuario con todo el contexto actual."""
-    ahora = datetime.now()
+# ── HA API ─────────────────────────────────────────────────────────────────────
+
+HA_HEADERS = {
+    "Authorization": f"Bearer {HA_TOKEN}",
+    "Content-Type":  "application/json"
+}
+
+def ha_get_estado(entity_id: str) -> dict:
+    """Obtiene el estado actual de una entidad."""
+    try:
+        r = requests.get(
+            f"{HA_URL}/api/states/{entity_id}",
+            headers=HA_HEADERS,
+            timeout=5
+        )
+        r.raise_for_status()
+        return r.json()
+    except Exception as e:
+        print(f"[HA] Error obteniendo {entity_id}: {e}")
+        return {}
+
+def ha_get_todos_estados() -> dict:
+    """
+    Carga el estado inicial de todas las entidades monitorizadas.
+    Se llama una vez al arrancar.
+    """
+    print("[HA] Cargando estado inicial...")
+    estados = {}
+    for entity_id in ENTIDADES_MONITORIZAR:
+        datos = ha_get_estado(entity_id)
+        if datos:
+            estados[entity_id] = {
+                "valor": datos.get("state"),
+                "ts":    datetime.now().strftime("%H:%M:%S")
+            }
+            print(f"[HA] {entity_id} → {datos.get('state')}")
+    print(f"[HA] {len(estados)} entidades cargadas")
+    return estados
+
+
+def ha_llamar_servicio(dominio: str, servicio: str, datos: dict = None) -> bool:
+    datos = datos or {}
+
+    # Correcciones de nombres de servicio
+    correcciones = {
+        "media_player.pause":  "media_player.media_pause",
+        "media_player.play":   "media_player.media_play",
+        "media_player.stop":   "media_player.media_stop",
+        "media_player.next":   "media_player.media_next_track",
+        "media_player.prev":   "media_player.media_previous_track",
+    }
+    clave = f"{dominio}.{servicio}"
+    if clave in correcciones:
+        dominio, servicio = correcciones[clave].split(".", 1)
+        print(f"[HA] Corregido → {dominio}.{servicio}")
+
+    servicios_que_requieren_entity = {
+        "turn_on", "turn_off", "toggle",
+        "media_pause", "media_play", "media_stop",    # ← nombres corregidos
+        "media_next_track", "media_previous_track",
+        "play_media", "alarm_arm_away", "alarm_disarm"
+    }
+
+    if servicio in servicios_que_requieren_entity and "entity_id" not in datos:
+        print(f"[HA] ✗ {dominio}.{servicio} requiere entity_id — ignorado")
+        return False
+
+    try:
+        r = requests.post(
+            f"{HA_URL}/api/services/{dominio}/{servicio}",
+            headers=HA_HEADERS,
+            json=datos,
+            timeout=5
+        )
+        r.raise_for_status()
+        print(f"[HA] ✓ {dominio}.{servicio} ({datos.get('entity_id', '')})")
+        return True
+    except Exception as e:
+        print(f"[HA] ✗ {dominio}.{servicio}: {e}")
+        return False
+
+
+def escuchar_eventos_ws():
+    """
+    Usa el WebSocket nativo de HA en lugar de SSE.
+    Protocolo HA WebSocket: https://developers.home-assistant.io/docs/api/websocket
+    """
+    ws_url = HA_URL.replace("http://", "ws://").replace("https://", "wss://") + "/api/websocket"
+    msg_id = [1]  # contador de IDs de mensaje
+
+    def on_open(ws):
+        print("[WS-HA] Conectado")
+
+    def on_message(ws, message):
+        try:
+            data = json.loads(message)
+            tipo = data.get("type")
+
+            # 1. Auth required — enviar token
+            if tipo == "auth_required":
+                ws.send(json.dumps({
+                    "type": "auth",
+                    "access_token": HA_TOKEN
+                }))
+
+            # 2. Auth OK — suscribirse a state_changed
+            elif tipo == "auth_ok":
+                print("[WS-HA] Autenticado — suscribiendo a state_changed")
+                ws.send(json.dumps({
+                    "id":         msg_id[0],
+                    "type":       "subscribe_events",
+                    "event_type": "state_changed"
+                }))
+                msg_id[0] += 1
+
+            # 3. Evento recibido
+            elif tipo == "event":
+                event = data.get("event", {})
+                if event.get("event_type") == "state_changed":
+                    procesar_cambio_estado(event.get("data", {}))
+
+        except Exception as e:
+            print(f"[WS-HA] Error procesando mensaje: {e}")
+
+    def on_error(ws, error):
+        print(f"[WS-HA] Error: {error}")
+
+    def on_close(ws, *args):
+        print("[WS-HA] Desconectado — reconectando en 5s")
+        time.sleep(5)
+        escuchar_eventos_ws()  # reconectar
+
+    ws = websocket.WebSocketApp(
+        ws_url,
+        on_open=on_open,
+        on_message=on_message,
+        on_error=on_error,
+        on_close=on_close
+    )
+    ws.run_forever()
+
+def procesar_cambio_estado(event_data: dict):
+    """Procesa un cambio de estado recibido por WebSocket."""
+    entity_id = event_data.get("entity_id", "")
+    new_state = event_data.get("new_state", {})
+    old_state = event_data.get("old_state", {})
+
+    if not entity_id or not new_state:
+        return
+
+    if entity_id not in ENTIDADES_MONITORIZAR:
+        return
+
+    valor_nuevo = new_state.get("state")
+    valor_viejo = old_state.get("state") if old_state else None
+
+    if valor_nuevo == valor_viejo:
+        return
+
+    ts = datetime.now().strftime("%H:%M:%S")
+    evento = {
+        "entity_id": entity_id,
+        "valor":     valor_nuevo,
+        "anterior":  valor_viejo,
+        "ts":        ts
+    }
 
     with _lock:
-        # Resumen del contexto HA (solo entidades relevantes)
-        dominios_relevantes = {
-            "light", "switch", "media_player", "alarm_control_panel",
-            "person", "binary_sensor", "sensor", "climate", "calendar",
-            "input_boolean", "input_number"
-        }
-        ctx_filtrado = {
-            k: v for k, v in contexto_ha.items()
-            if k.split(".")[0] in dominios_relevantes
+        contexto_ha[entity_id] = {"valor": valor_nuevo, "ts": ts}
+        historial_ha.append(evento)
+
+    print(f"[HA] {entity_id}: {valor_viejo} → {valor_nuevo}")
+
+    if entity_id in ENTIDADES_REACTIVAS:
+        threading.Thread(
+            target=tomar_decision,
+            args=(f"Cambio: {entity_id} {valor_viejo} → {valor_nuevo}",),
+            daemon=True
+        ).start()
+
+
+# ── SSE: escuchar eventos en tiempo real ───────────────────────────────────────
+
+def escuchar_eventos_sse():
+    """
+    Conecta al endpoint SSE de HA y escucha cambios de estado en tiempo real.
+    Reconecta automáticamente si se pierde la conexión.
+    """
+    url = f"{HA_URL}/api/stream"
+
+    while True:
+        try:
+            print("[SSE] Conectando a Home Assistant...")
+            with requests.get(
+                url,
+                headers={**HA_HEADERS, "Accept": "text/event-stream"},
+                stream=True,
+                timeout=None  # conexión permanente
+            ) as r:
+                r.raise_for_status()
+                print("[SSE] Conectado — escuchando eventos")
+
+                buffer = ""
+                for chunk in r.iter_content(chunk_size=None, decode_unicode=True):
+                    buffer += chunk
+                    # Los eventos SSE terminan con doble salto de línea
+                    while "\n\n" in buffer:
+                        evento_raw, buffer = buffer.split("\n\n", 1)
+                        procesar_evento_sse(evento_raw)
+
+        except Exception as e:
+            print(f"[SSE] Error: {e} — reconectando en 5s")
+            time.sleep(5)
+
+def procesar_evento_sse(evento_raw: str):
+    try:
+        lineas = evento_raw.strip().split("\n")
+        tipo   = None
+        datos  = None
+
+        for linea in lineas:
+            if linea.startswith("event:"):
+                tipo = linea.split(":", 1)[1].strip()
+            elif linea.startswith("data:"):
+                datos_raw = linea.split(":", 1)[1].strip()
+                try:
+                    datos = json.loads(datos_raw)
+                except json.JSONDecodeError:
+                    pass
+
+        if tipo != "state_changed" or not datos:
+            return
+
+        event_data = datos.get("data", {})
+        entity_id  = event_data.get("entity_id", "")
+        new_state  = event_data.get("new_state", {})
+
+        # ← AÑADIR ESTAS LÍNEAS TEMPORALMENTE
+        if entity_id in ENTIDADES_MONITORIZAR or any(
+            mon in entity_id for mon in ["habitacion", "salon", "presencia", "luz"]
+        ):
+            valor_nuevo = new_state.get("state") if new_state else "?"
+            valor_viejo = contexto_ha.get(entity_id, {}).get("valor", "?")
+            print(f"[SSE DEBUG] {entity_id}: {valor_viejo} → {valor_nuevo} | en_set={entity_id in ENTIDADES_MONITORIZAR}")
+        # ← FIN AÑADIR
+
+        if not entity_id or not new_state:
+            return
+
+        if entity_id not in ENTIDADES_MONITORIZAR:
+            return
+
+        valor_nuevo = new_state.get("state")
+        valor_viejo = contexto_ha.get(entity_id, {}).get("valor")
+
+        # Ignorar si el valor no cambió
+        if valor_nuevo == valor_viejo:
+            return
+
+        ts = datetime.now().strftime("%H:%M:%S")
+        evento = {
+            "entity_id": entity_id,
+            "valor":     valor_nuevo,
+            "anterior":  valor_viejo,
+            "ts":        ts
         }
 
-        # Últimos eventos
-        eventos_recientes = list(historial_ha)[-10:]
+        with _lock:
+            contexto_ha[entity_id] = {"valor": valor_nuevo, "ts": ts}
+            historial_ha.append(evento)
+
+        print(f"[HA] {entity_id}: {valor_viejo} → {valor_nuevo}")
+
+        # Reacción inmediata para entidades reactivas
+        if entity_id in ENTIDADES_REACTIVAS:
+            threading.Thread(
+                target=tomar_decision,
+                args=(f"Cambio de estado: {entity_id} {valor_viejo} → {valor_nuevo}",),
+                daemon=True
+            ).start()
+
+    except Exception as e:
+        print(f"[SSE] Error procesando evento: {e}")
+
+# ── LLM ────────────────────────────────────────────────────────────────────────
+
+def llm_completar(mensajes: list) -> str:
+    config = LLM_CONFIG[LLM_PROVIDER]
+
+    if LLM_PROVIDER in ("openai", "ollama"):
+        from openai import OpenAI
+        kwargs = {"api_key": config["api_key"]}
+        if config.get("base_url"):
+            kwargs["base_url"] = config["base_url"]
+        client = OpenAI(**kwargs)
+        respuesta = client.chat.completions.create(
+            model=config["model"],
+            messages=mensajes,
+            response_format={"type": "json_object"},
+            temperature=0.4
+        )
+        return respuesta.choices[0].message.content
+
+    elif LLM_PROVIDER == "anthropic":
+        import anthropic
+        client = anthropic.Anthropic(api_key=config["api_key"])
+        system = next((m["content"] for m in mensajes if m["role"] == "system"), "")
+        msgs   = [m for m in mensajes if m["role"] != "system"]
+        r = client.messages.create(
+            model=config["model"],
+            max_tokens=1024,
+            system=system,
+            messages=msgs
+        )
+        return r.content[0].text
+
+    raise ValueError(f"Proveedor LLM desconocido: {LLM_PROVIDER}")
+
+# ── Prompts ────────────────────────────────────────────────────────────────────
+
+def construir_prompt_usuario(motivo: str) -> str:
+    ahora = datetime.now()
+    with _lock:
+        ctx  = {k: v["valor"] for k, v in contexto_ha.items()}
+        hist = list(historial_ha)[-5:]
 
     return f"""
-MOTIVO DE ESTA CONSULTA: {motivo}
-
-HORA Y FECHA ACTUAL: {ahora.strftime("%A %d/%m/%Y %H:%M")} (hora España)
-DÍA DE LA SEMANA: {ahora.strftime("%A")}
+MOTIVO: {motivo}
+HORA: {ahora.strftime("%A %d/%m/%Y %H:%M")}
 
 ESTADO ACTUAL DEL HOGAR:
-{json.dumps(ctx_filtrado, indent=2, ensure_ascii=False)}
+{json.dumps(ctx, ensure_ascii=False, indent=2)}
 
 ÚLTIMOS EVENTOS:
-{json.dumps(eventos_recientes, indent=2, ensure_ascii=False)}
+{json.dumps(hist, ensure_ascii=False)}
 
-Basándote en este contexto y las preferencias de Kevin, ¿qué debe hacer Riatla ahora?
+¿Qué debe hacer Riatla ahora?
 """
 
 # ── Motor de decisión ──────────────────────────────────────────────────────────
 
+_decision_en_curso = threading.Event()
+
 def tomar_decision(motivo: str):
-    """
-    Consulta al LLM y ejecuta las acciones resultantes.
-    Mantiene el historial de conversación para coherencia a largo plazo.
-    """
-    print(f"\n[Agente] Tomando decisión — motivo: {motivo}")
+    # Evitar decisiones simultáneas — esperar si hay una en curso
+    if _decision_en_curso.is_set():
+        print(f"[Agente] Decisión en curso, descartando: {motivo}")
+        return
 
+    _decision_en_curso.set()
+    print(f"\n[Agente] Decisión — {motivo}")
     try:
-        # Construir historial de conversación
         mensajes = [{"role": "system", "content": SYSTEM_PROMPT}]
-
-        # Añadir historial previo (para coherencia)
         with _lock:
             mensajes.extend(list(historial_conv))
+        prompt = construir_prompt_usuario(motivo)
+        mensajes.append({"role": "user", "content": prompt})
 
-        # Añadir consulta actual
-        prompt_usuario = construir_prompt_usuario(motivo)
-        mensajes.append({"role": "user", "content": prompt_usuario})
-
-        # Consultar LLM
         respuesta_raw = llm_completar(mensajes)
         respuesta     = json.loads(respuesta_raw)
 
-        print(f"[Agente] Razonamiento: {respuesta.get('razonamiento', '')}")
+        print(f"[Agente] {respuesta.get('razonamiento', '')}")
 
-        # Guardar en historial de conversación
         with _lock:
-            historial_conv.append({"role": "user",      "content": prompt_usuario})
+            historial_conv.append({"role": "user",      "content": prompt})
             historial_conv.append({"role": "assistant",  "content": respuesta_raw})
 
-        # Ejecutar acciones
         acciones = respuesta.get("acciones", [])
         if not acciones:
-            print("[Agente] Sin acciones que ejecutar")
+            print("[Agente] Sin acciones")
             return
 
         for accion in acciones:
             ejecutar_accion(accion)
 
     except Exception as e:
-        print(f"[Agente] Error en tomar_decision: {e}")
+        print(f"[Agente] Error: {e}")
+    finally:
+        _decision_en_curso.clear()  # siempre liberar aunque haya error
+
+# ── Cooldown — evitar repetir acciones ────────────────────────────────────────
+
+COOLDOWN_SEGUNDOS = 120  # mínimo tiempo entre la misma acción
+_ultima_accion    = {}   # { "topic:valor": timestamp }
+
+def accion_en_cooldown(topic: str, valor: str) -> bool:
+    clave = f"{topic}:{valor}"
+    ahora = time.time()
+    ultimo = _ultima_accion.get(clave, 0)
+    if ahora - ultimo < COOLDOWN_SEGUNDOS:
+        print(f"[Agente] Cooldown activo para {clave} — ignorado")
+        return True
+    _ultima_accion[clave] = ahora
+    return False
 
 def ejecutar_accion(accion: dict):
-    """Despacha la acción a Riatla (MQTT) o a Home Assistant (REST)."""
     tipo = accion.get("tipo", "")
 
     if tipo == "riatla":
         topic = accion.get("topic", "")
         datos = accion.get("datos", {})
-        if topic:
-            riatla_enviar(topic, datos)
+        if not topic:
+            return
+        # Cooldown basado en topic + primer valor relevante
+        valor_clave = str(datos.get("emocion") or datos.get("estado") or datos.get("nombre") or "")
+        if accion_en_cooldown(topic, valor_clave):
+            return
+        riatla_enviar(topic, datos)
 
     elif tipo == "ha":
         dominio  = accion.get("dominio", "")
@@ -283,129 +695,94 @@ def ejecutar_accion(accion: dict):
 def riatla_enviar(topic_sufijo: str, payload: dict):
     if _mqtt_client is None:
         return
-    topic   = TOPIC_RIATLA.format(topic_sufijo)
+    topic   = f"riatla/{topic_sufijo}"
     mensaje = json.dumps(payload)
     _mqtt_client.publish(topic, mensaje)
     print(f"[Riatla] → {topic}: {mensaje}")
 
-# ── HA REST API ────────────────────────────────────────────────────────────────
+# ── MQTT (solo para enviar a Riatla) ──────────────────────────────────────────
 
-def ha_llamar_servicio(dominio: str, servicio: str, datos: dict = None) -> bool:
-    try:
-        r = requests.post(
-            f"{HA_URL}/api/services/{dominio}/{servicio}",
-            headers={
-                "Authorization": f"Bearer {HA_TOKEN}",
-                "Content-Type":  "application/json"
-            },
-            json=datos or {},
-            timeout=5
-        )
-        r.raise_for_status()
-        print(f"[HA] {dominio}.{servicio} → OK")
-        return True
-    except Exception as e:
-        print(f"[HA] Error en {dominio}.{servicio}: {e}")
-        return False
-
-# ── MQTT callbacks ─────────────────────────────────────────────────────────────
-
-def on_connect(client, userdata, flags, rc):
-    if rc == 0:
-        print(f"[MQTT] Conectado a {MQTT_HOST}:{MQTT_PORT}")
-        client.subscribe(TOPIC_HA_ALL)
-    else:
-        print(f"[MQTT] Error de conexión: {rc}")
-
-def on_disconnect(client, userdata, rc):
-    print(f"[MQTT] Desconectado (rc={rc}), reconectando...")
-
-def on_message(client, userdata, msg):
-    """
-    Procesa eventos de HA. Los eventos de dominios reactivos
-    disparan una decisión inmediata del agente.
-    """
-    topic = msg.topic
-    try:
-        payload = msg.payload.decode("utf-8").strip()
-        if not payload:
-            return
-
-        partes    = topic.split("/")
-        if len(partes) < 3:
-            return
-
-        dominio   = partes[1]
-        entity_id = f"{dominio}.{'_'.join(partes[2:])}"
-
-        try:
-            valor = json.loads(payload)
-        except json.JSONDecodeError:
-            valor = payload
-
-        evento = {
-            "entity_id": entity_id,
-            "valor":     valor,
-            "ts":        time.strftime("%Y-%m-%dT%H:%M:%S")
-        }
-
-        with _lock:
-            contexto_ha[entity_id] = {"valor": valor, "ts": evento["ts"]}
-            historial_ha.append(evento)
-
-        # Reacción inmediata para dominios relevantes
-        if dominio in EVENTOS_REACTIVOS:
-            # Lanzar en hilo separado para no bloquear el loop MQTT
-            threading.Thread(
-                target=tomar_decision,
-                args=(f"Evento reactivo: {entity_id} → {valor}",),
-                daemon=True
-            ).start()
-
-    except Exception as e:
-        print(f"[MQTT] Error procesando {topic}: {e}")
+def iniciar_mqtt():
+    global _mqtt_client
+    client = mqtt.Client()
+    client.username_pw_set(MQTT_USER, MQTT_PASS)
+    client.on_connect    = lambda c, u, f, rc: print(f"[MQTT] {'Conectado' if rc==0 else f'Error {rc}'}")
+    client.on_disconnect = lambda c, u, rc: print(f"[MQTT] Desconectado")
+    client.reconnect_delay_set(min_delay=1, max_delay=30)
+    client.connect(MQTT_HOST, MQTT_PORT, keepalive=60)
+    client.loop_start()   # hilo no bloqueante — solo necesitamos publicar
+    _mqtt_client = client
 
 # ── Revisión periódica ─────────────────────────────────────────────────────────
 
 def loop_revision_periodica():
-    """Revisa el contexto cada INTERVALO_REVISION segundos."""
+    global _ultimo_snapshot
+    
+    print("[Agente] Loop periódico iniciado")  # ← añadir
+    
+    with _lock:
+        _ultimo_snapshot = {k: v["valor"] for k, v in contexto_ha.items()}
+    
+    print(f"[Agente] Snapshot inicial: {len(_ultimo_snapshot)} entidades")  # ← añadir
+
     while True:
         time.sleep(INTERVALO_REVISION)
+        #print(f"[Agente] Tick periódico — revisando...")  # ← añadir temporalmente
+
+        with _lock:
+            snapshot_actual = {k: v["valor"] for k, v in contexto_ha.items()}
+
+        cambios = {
+            k: v for k, v in snapshot_actual.items()
+            if _ultimo_snapshot.get(k) != v
+        }
+
+        if not cambios:
+            #print("[Agente] Revisión periódica — sin cambios, omitida")
+            continue
+
+        _ultimo_snapshot = snapshot_actual.copy()
+        resumen = ", ".join(f"{k}={v}" for k, v in cambios.items())
+        print(f"[Agente] Revisión periódica — cambios: {resumen}")
         threading.Thread(
             target=tomar_decision,
-            args=(f"Revisión periódica ({INTERVALO_REVISION}s)",),
+            args=(f"Revisión periódica — cambios: {resumen}",),
             daemon=True
         ).start()
 
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 def main():
-    global _mqtt_client
-
     print("╔══════════════════════════════════╗")
-    print("║      Riatla Agent v0.1           ║")
+    print("║      Riatla Agent v0.2           ║")
     print("╚══════════════════════════════════╝")
     print(f"LLM   → {LLM_PROVIDER} / {LLM_CONFIG[LLM_PROVIDER]['model']}")
-    print(f"MQTT  → {MQTT_HOST}:{MQTT_PORT}")
     print(f"HA    → {HA_URL}")
+    print(f"MQTT  → {MQTT_HOST}:{MQTT_PORT} (solo salida)")
     print(f"Revisión cada {INTERVALO_REVISION}s\n")
 
-    # Hilo de revisión periódica
+    # Cargar estado inicial de HA
+    with _lock:
+        contexto_ha.update(ha_get_todos_estados())
+
+    # MQTT solo para publicar en riatla/#
+    iniciar_mqtt()
+
+    # Revisión periódica en hilo propio
     threading.Thread(target=loop_revision_periodica, daemon=True).start()
 
-    # Cliente MQTT
-    client = mqtt.Client()
-    client.username_pw_set(MQTT_USER, MQTT_PASS)
-    client.on_connect    = on_connect
-    client.on_disconnect = on_disconnect
-    client.on_message    = on_message
-    client.reconnect_delay_set(min_delay=1, max_delay=30)
+    # SSE en hilo propio — bloquea hasta reconexión
+    #sse_thread = threading.Thread(target=escuchar_eventos_sse, daemon=True)
+    #sse_thread.start()
 
-    _mqtt_client = client
+    ws_thread = threading.Thread(target=escuchar_eventos_ws, daemon=True)
+    ws_thread.start()
+
+    print("\n[Agente] Listo. Esperando eventos de HA...\n")
 
     try:
-        client.connect(MQTT_HOST, MQTT_PORT, keepalive=60)
-        client.loop_forever()
+        while True:
+            time.sleep(1)
     except KeyboardInterrupt:
         print("\n[Agente] Detenido.")
 
