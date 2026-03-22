@@ -25,34 +25,31 @@ import paho.mqtt.client as mqtt
 from datetime import datetime
 from collections import deque
 
-# ── Configuración ──────────────────────────────────────────────────────────────
+from dotenv import load_dotenv
+import os
+load_dotenv()
 
-MQTT_HOST = "192.168.1.126"
-MQTT_PORT = 1883
-MQTT_USER = "meshmqtt"
-MQTT_PASS = "m3sq77"
-
-HA_URL   = "http://192.168.1.126:8123"
-HA_TOKEN =
-# ── Configuración LLM ──────────────────────────────────────────────────────────
-# Cambiar LLM_PROVIDER para cambiar de proveedor sin tocar nada más
-
-LLM_PROVIDER = "openai"   # "openai" | "anthropic" | "ollama"
+MQTT_HOST = os.getenv("MQTT_HOST", "192.168.1.126")
+MQTT_PORT = int(os.getenv("MQTT_PORT", 1883))
+MQTT_USER = os.getenv("MQTT_USER")
+MQTT_PASS = os.getenv("MQTT_PASS")
+HA_URL    = os.getenv("HA_URL")
+HA_TOKEN  = os.getenv("HA_TOKEN")
 
 LLM_CONFIG = {
     "openai": {
-        "api_key": "sk-...",
-        "model":   "gpt-4o-mini",   # o "gpt-4o" para más capacidad
-        "base_url": None            # None = default OpenAI
+        "api_key":  os.getenv("OPENAI_API_KEY"),
+        "model":    "gpt-4o-mini",
+        "base_url": None
     },
     "anthropic": {
-        "api_key": "sk-ant-...",
-        "model":   "claude-haiku-4-5-20251001"  # o claude-sonnet-4-6
+        "api_key": os.getenv("ANTHROPIC_API_KEY"),
+        "model":   "claude-haiku-4-5-20251001"
     },
     "ollama": {
-        "api_key": "ollama",        # ollama no necesita key real
-        "model":   "llama3.2",
-        "base_url": "http://localhost:11434/v1"  # ollama usa API compatible OpenAI
+        "api_key":  "ollama",
+        "model":    "llama3.2",
+        "base_url": "http://localhost:11434/v1"
     }
 }
 

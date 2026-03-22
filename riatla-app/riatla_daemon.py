@@ -41,14 +41,17 @@ import websockets
 import paho.mqtt.client as mqtt
 from websockets.server import serve
 
-# ── Configuración ─────────────────────────────────────────────────────────────
-# Modificar según el entorno. MQTT_PASS se almacena en texto plano; en producción
-# considerar variables de entorno o un fichero de secretos externo.
 
-MQTT_HOST = "192.168.1.126"
-MQTT_PORT = 1883
-MQTT_USER = "meshmqtt"
-MQTT_PASS = "m3sq77"
+from dotenv import load_dotenv
+import os
+load_dotenv()
+
+MQTT_HOST = os.getenv("MQTT_HOST", "192.168.1.126")
+MQTT_PORT = int(os.getenv("MQTT_PORT", 1883))
+MQTT_USER = os.getenv("MQTT_USER")
+MQTT_PASS = os.getenv("MQTT_PASS")
+HA_URL    = os.getenv("HA_URL")
+HA_TOKEN  = os.getenv("HA_TOKEN")
 
 WS_HOST = "localhost"
 WS_PORT = 8765  # debe coincidir con WEBSOCKET_URL en renderer.js
