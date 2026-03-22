@@ -142,7 +142,9 @@ COMPORTAMIENTO SEGÚN PRESENCIA:
 EFICIENCIA ENERGÉTICA:
 - Si una luz lleva encendida >2 min sin presencia en esa habitación → apagarla
 - Si nadie en casa → apagar todas las luces y switch.socket_proyector_switch
-- Si área queda sin presencia → revisar si parar música o apagar proyector
+- Si estudio se queda sin presencia → parar música
+- Si salon se queda sin presencia → apagar proyector
+
 - Mapeo luces ↔ presencia:
     light.habitacion  ↔  binary_sensor.grupopresenciadormitorio
     light.salon       ↔  binary_sensor.grupopresenciasalon
@@ -659,7 +661,33 @@ def construir_prompt_usuario(motivo: str) -> str:
     ahora = datetime.now()
     with _lock:
         ctx  = {k: v["valor"] for k, v in contexto_ha.items()}
-        hist = list(historial_ha)[-5:]
+        hist = list(historial_ha)[-10:]  # subir a 10 para más contexto
+
+    # Calcular tiempo sin presencia para cada habitación
+    presencia_info = {}
+    mapeo = {
+        "binary_sensor.grupopresenciadormitorio":   "dormitorio",
+        "binary_sensor.grupopresenciasalon":        "salon",
+        "binary_sensor.grupopresenciacocina":       "cocina",
+        "binary_sensor.grupopresenciaestudiokevin": "estudio",
+        "binary_sensor.presencia_salon_presence_sensor_2" : "sofa_salon",
+        "binary_sensor.presencia_salon_presence_sensor_3" : "mesa_salon",
+    }
+    for sensor, nombre in mapeo.items():
+        datos = contexto_ha.get(sensor, {})
+        valor = datos.get("valor", "unknown")
+        ts    = datos.get("ts", None)
+        if ts and valor == "off":
+            try:
+                ts_dt    = datetime.strptime(ts, "%H:%M:%S").replace(
+                    year=ahora.year, month=ahora.month, day=ahora.day
+                )
+                minutos  = int((ahora - ts_dt).total_seconds() / 60)
+                presencia_info[nombre] = f"sin presencia hace {minutos} min"
+            except:
+                presencia_info[nombre] = f"sin presencia (tiempo desconocido)"
+        elif valor == "on":
+            presencia_info[nombre] = "con presencia"
 
     return f"""
 MOTIVO: {motivo}
@@ -667,6 +695,9 @@ HORA: {ahora.strftime("%A %d/%m/%Y %H:%M")}
 
 ESTADO ACTUAL DEL HOGAR:
 {json.dumps(ctx, ensure_ascii=False, indent=2)}
+
+TIEMPO SIN PRESENCIA POR HABITACIÓN:
+{json.dumps(presencia_info, ensure_ascii=False, indent=2)}
 
 ÚLTIMOS EVENTOS:
 {json.dumps(hist, ensure_ascii=False)}
