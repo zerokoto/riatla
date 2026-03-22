@@ -54,7 +54,7 @@ function setupScene() {
 
   // Ángulo reducido (10°) para acercar el plano facial sin distorsión
   camera = new THREE.PerspectiveCamera(
-    15,
+    13,
     window.innerWidth / window.innerHeight,
     0.1,
     1000
@@ -1263,7 +1263,7 @@ const musicaState = {
   r1: 0, r2: 0, r3: 0
 };
 
-const MUSICA_FADE_SPEED = 0.015; // ~1.1 s a 60 FPS para ir de 0 a 1
+const MUSICA_FADE_SPEED = 0.001 //0.015; // ~1.1 s a 60 FPS para ir de 0 a 1
 
 /**
  * Animación de baile sutil: sway lateral del cuerpo + rebote de brazos y muñecas.
@@ -1312,14 +1312,14 @@ function animarMusica() {
   // Frecuencias primas entre sí → periodo de repetición > 30 minutos reales
   const mod1 = 0.65 + 0.35 * Math.sin(t * 0.031 + r1); // modula amplitud brazos
   const mod2 = 0.65 + 0.35 * Math.sin(t * 0.017 + r2); // modula amplitud antebrazos y cuello
-  const mod3 = 0.50 + 0.10 * Math.sin(t * 0.023 + r3); // modula la frecuencia base del sway 0.90
+  const mod3 = (0.50 + 0.10 * Math.sin(t * 0.023 + r3))*0.5; // modula la frecuencia base del sway 0.90
 
   // ── Caderas y columna: sway en S ──────────────────────────────────────────
   // FRECUENCIA FIJA — mod3 solo modula amplitud, no velocidad
   const swayBase = Math.sin(t * 0.9);  // frecuencia fija
 
   const hips = humanoid.getNormalizedBoneNode('hips');
-  if (hips)  hips.rotation.z  =  swayBase         * 0.02  * mod3 * amp;
+  if (hips)  hips.rotation.z  =  swayBase         * 0.02  * mod3 * amp * 0;
 
   const spine = humanoid.getNormalizedBoneNode('spine');
   if (spine) spine.rotation.z = -swayBase         * 0.025 * mod3 * amp;
@@ -1376,7 +1376,7 @@ function animarMusica() {
     const bang  = Math.pow(Math.max(0, Math.sin(t * 1.5)), 0.85);
     ritmoVisible = bang;
     if (head) {
-      head.rotation.x = (0.02 + bang * 0.08) * amp;  // 0.02 reposo → 0.16 nod máximo
+      head.rotation.x = (0.02 + bang * 0.08) * amp *0.5;  // 0.02 reposo → 0.16 nod máximo
       head.rotation.y = miradaState.currentY;          // preservar giro lateral de mirada
     }
     

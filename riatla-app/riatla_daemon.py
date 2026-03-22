@@ -61,6 +61,7 @@ TOPIC_WORLD_LUZ  = "riatla/world/luz"
 TOPIC_WORLD_MUSICA = "riatla/world/musica"
 TOPIC_WORLD_ALL  = "riatla/world/#"   # agrupa TOPIC_WORLD y todos sus subtopics
 TOPIC_OBJETO     = "riatla/objeto"
+TOPIC_HA         = "homeassistant/#"  # para futuras integraciones específicas con HA
 
 # Deben coincidir exactamente con los case de ejecutarComando() en renderer.js
 EMOCIONES_VALIDAS = {"happy", "angry", "sad", "relaxed", "surprised", "neutral"}
@@ -235,7 +236,8 @@ def on_connect(client, userdata, flags, rc):
         client.subscribe(TOPIC_RESET)
         client.subscribe(TOPIC_WORLD_ALL)
         client.subscribe(TOPIC_OBJETO)
-        print(f"[MQTT] Escuchando: {TOPIC_EMOCION}, {TOPIC_RESET}, {TOPIC_WORLD_ALL}")
+        client.subscribe(TOPIC_HA)
+        print(f"[MQTT] Escuchando: {TOPIC_EMOCION}, {TOPIC_RESET}, {TOPIC_WORLD_ALL}, {TOPIC_OBJETO}, {TOPIC_HA}")
         client.publish(TOPIC_ESTADO, json.dumps({
             "emocion": "neutral",
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
