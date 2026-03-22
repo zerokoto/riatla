@@ -53,6 +53,7 @@ MQTT_PASS = "m3sq77"
 WS_HOST = "localhost"
 WS_PORT = 8765  # debe coincidir con WEBSOCKET_URL en renderer.js
 
+TOPIC_HUESO      = "riatla/hueso"
 TOPIC_EMOCION    = "riatla/emocion"
 TOPIC_RESET      = "riatla/reset"
 TOPIC_ESTADO     = "riatla/estado"
@@ -237,7 +238,8 @@ def on_connect(client, userdata, flags, rc):
         client.subscribe(TOPIC_WORLD_ALL)
         client.subscribe(TOPIC_OBJETO)
         client.subscribe(TOPIC_HA)
-        print(f"[MQTT] Escuchando: {TOPIC_EMOCION}, {TOPIC_RESET}, {TOPIC_WORLD_ALL}, {TOPIC_OBJETO}, {TOPIC_HA}")
+        client.subscribe(TOPIC_HUESO)
+        print(f"[MQTT] Escuchando: {TOPIC_EMOCION}, {TOPIC_RESET}, {TOPIC_WORLD_ALL}, {TOPIC_OBJETO}, {TOPIC_HA}, {TOPIC_HUESO}")
         client.publish(TOPIC_ESTADO, json.dumps({
             "emocion": "neutral",
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -307,6 +309,21 @@ def on_message(client, userdata, msg):
             accion = "add"
         enviar_comando("objeto", {"nombre": nombre, "accion": accion})
         print(f"[Riatla] Objeto → {accion}: {nombre}")
+
+    if topic == TOPIC_HUESO:
+        try:
+            data     = json.loads(payload_raw)
+            huesos   = data.get("huesos", [])
+            duracion = data.get("duracion", 800)
+            lerp     = data.get("lerp", True)
+            enviar_comando("hueso", {
+                "huesos":   huesos,
+                "duracion": duracion,
+                "lerp":     lerp
+            })
+            print(f"[Riatla] Huesos → {[h.get('nombre') for h in huesos]}")
+        except json.JSONDecodeError:
+            print(f"[Riatla] Error parseando hueso: {payload_raw}")
 
 def set_world(path: str, mqtt_client=None):
     """
