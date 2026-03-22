@@ -372,11 +372,14 @@ function addObjeto(nombre) {
         miradaState.targetX =  0.2;  // ligeramente abajo (leyendo)
         miradaState.targetY = 0.2;   // hacia su izq donde está el libro
 
-      // Brazo izquierdo levantado sosteniendo el libro
-      lerpHueso(currentVRM, 'leftUpperArm', { x:  Math.PI/10, y: -Math.PI/10, z: -Math.PI/4  });
-      lerpHueso(currentVRM, 'leftLowerArm', { x:  0,          y:  -Math.PI/2, z: 0 }); 
-      lerpHueso(currentVRM, 'leftHand',     { x: -Math.PI/2,           y:  0,          z:  0 });
-      iniciarLerp();
+        // Esperar a que cualquier pose anterior termine (lerp ~800ms)
+        setTimeout(() => {
+          if (!objetosActivos[nombre]) return; // por si lo quitaron antes
+          lerpHueso(currentVRM, 'leftUpperArm', { x: Math.PI/10, y: -Math.PI/10, z: -Math.PI/4 });
+          lerpHueso(currentVRM, 'leftLowerArm', { x: 0,          y: -Math.PI/2,  z: 0          });
+          lerpHueso(currentVRM, 'leftHand',     { x: -Math.PI/2, y: 0,           z: 0          });
+          iniciarLerp();
+        }, 900); // 900ms > duración del lerp (800ms)
       }
     },
     undefined,
@@ -582,14 +585,23 @@ function iniciarLerp() {
 
 /** Transición suave de vuelta a la pose de reposo. */
 function poseNeutral(vrm) {
+  // Brazos completos
   lerpHueso(vrm, 'leftUpperArm',  { x: 0, y: 0, z: -1.2 });
   lerpHueso(vrm, 'rightUpperArm', { x: 0, y: 0, z:  1.2 });
   lerpHueso(vrm, 'leftLowerArm',  { x: 0, y: 0, z: -0.2 });
   lerpHueso(vrm, 'rightLowerArm', { x: 0, y: 0, z:  0.2 });
   lerpHueso(vrm, 'leftHand',      { x: 0, y: 0, z:  0   });
   lerpHueso(vrm, 'rightHand',     { x: 0, y: 0, z:  0   });
+  // Cabeza y cuello
   lerpHueso(vrm, 'head',          { x: 0, y: 0, z:  0   });
   lerpHueso(vrm, 'neck',          { x: 0, y: 0, z:  0   });
+  // Hombros
+  lerpHueso(vrm, 'leftShoulder',  { x: 0, y: 0, z:  0   });
+  lerpHueso(vrm, 'rightShoulder', { x: 0, y: 0, z:  0   });
+  // Torso
+  lerpHueso(vrm, 'spine',         { x: 0, y: 0, z:  0   });
+  lerpHueso(vrm, 'chest',         { x: 0, y: 0, z:  0   });
+  lerpHueso(vrm, 'hips',          { x: 0, y: 0, z:  0   });
   iniciarLerp();
 }
 
@@ -773,12 +785,14 @@ function poseRelaxed(vrm) {
   lerpHueso(vrm, 'head', { x: 0, y: lado * 0.1, z: lado * 0.08 });
   lerpHueso(vrm, 'neck', { x: 0, y: lado * 0.06, z: lado * 0.04 });
 
-  // Brazos un poco más abiertos que en reposo
+  // Ambos brazos explícitamente — incluyendo manos y codos
   lerpHueso(vrm, 'leftUpperArm',  { x: 0, y: 0, z: -1.5 });
-  lerpHueso(vrm, 'rightUpperArm', { x: 0, y: 0.5, z:  1.5 });
+  lerpHueso(vrm, 'rightUpperArm', { x: 0, y: 0.5, z: 1.5 });
   lerpHueso(vrm, 'leftLowerArm',  { x: 0, y: 0, z:  0   });
   lerpHueso(vrm, 'rightLowerArm', { x: 0, y: 0, z:  0   });
-
+  lerpHueso(vrm, 'leftHand',      { x: 0, y: 0, z:  0   }); // ← reset mano de lectura
+  lerpHueso(vrm, 'rightHand',     { x: 0, y: 0, z:  0   });
+  
   iniciarLerp();
   removeAllObjetos();
 }
