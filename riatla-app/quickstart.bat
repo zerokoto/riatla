@@ -125,9 +125,10 @@ echo   - Esta ventana debe permanecer ABIERTA mientras usas la app
 echo   - Para arrancar el daemon Python, abre OTRA terminal y ejecuta:
 echo       python riatla_daemon.py
 echo.
-set /p RESPUESTA="Iniciar la app ahora? (S/N): "
-if /i "%RESPUESTA%"=="S" goto :iniciar
-if /i "%RESPUESTA%"=="si" goto :iniciar
+REM set /p RESPUESTA="Iniciar la app ahora? (S/N): "
+REM if /i "%RESPUESTA%"=="S" goto :iniciar
+REM if /i "%RESPUESTA%"=="si" goto :iniciar
+goto :iniciar
 echo.
 echo Para arrancar manualmente despues, ejecuta en esta carpeta:
 echo   npm start

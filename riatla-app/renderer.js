@@ -160,16 +160,17 @@ function loadVRM() {
 const WORLDS = {
   Studio: {
     path:     './world/Studio/studio.glb',
-    scale:    4.5,
-    rotation: 0,
-    offset:   { x: -1, y: 0, z: -1 },
-    hdr:      './textures/studio.hdr',   // ← añadir
+    scale:    6,
+    rotation: Math.PI/2,
+    offset:   { x: -2, y: -0.5, z: 0 },
+    hdr:      './textures/space.hdr',   // ← añadir
     camera:   { pos: [3, 1.8, 6], lookAt: [0, 1.2, 0] }
   },
   TinyRoom: {
     path:     './world/TinyRoom/TinyRoom.glb',
     scale:    2.5,
-    rotation: 0,
+    rotation: -Math.PI/8,
+    offset:   { x: -0.2, y: 0, z: -0.5 },
     hdr:      './textures/studio.hdr',            // ← añadir
     camera:   { pos: [3, 1.8, 6], lookAt: [0, 1.2, 0] }
   },
@@ -177,6 +178,14 @@ const WORLDS = {
     path:     './world/Space/space.glb',
     scale:    4,
     rotation: Math.PI + 0.1,
+    hdr:      './textures/space.hdr',           // ← añadir
+    camera:   { pos: [3, 1.8, 6], lookAt: [0, 1.2, 0] }
+  },
+  DND: {
+    path:     './world/Dnd/dnd.glb',
+    scale:    24,
+    rotation: Math.PI/2,
+    offset:   { x: 0, y: -0.8, z: 0 },
     hdr:      './textures/space.hdr',           // ← añadir
     camera:   { pos: [3, 1.8, 6], lookAt: [0, 1.2, 0] }
   }
@@ -283,6 +292,30 @@ const OBJECTS = {
     scale:    0.003,
     position: { x: 0, y: 1.5, z: 0 },  // delante del avatar, a su altura
     rotation: { x: 0,   y: 0,   z: 0 }  // rotación para que quede abierto y legible
+  },
+  comida: {
+    path:     './props/food.glb',
+    scale:    1.4,
+    position: { x: -0.1, y: 1.15, z: 0.5 },  // delante del avatar, a su altura
+    rotation: { x: 0,   y: Math.PI/16,   z: -Math.PI/8 }  // rotación para que quede abierto y legible
+  },
+  bebida: {
+    path:     './props/drink.glb',
+    scale:    0.9,
+    position: { x: 0.28, y: 1.15, z: 0 },  // delante del avatar, a su altura
+    rotation: { x: 0,   y: Math.PI/16,   z: -Math.PI/16 }  // rotación para que quede abierto y legible
+  },
+  timer: {
+    path:     './props/timer.glb',
+    scale:    0.8,
+    position: { x: -0.27, y: 1.4, z: 0 },  // delante del avatar, a su altura
+    rotation: { x: 0,   y: Math.PI/16,   z: Math.PI/8 }  // rotación para que quede abierto y legible
+  },
+  dnd: {
+    path:     './props/dnd.glb',
+    scale:    0.1,
+    position: { x: -0.25, y: 1.5, z: 0 },  // delante del avatar, a su altura
+    rotation: { x: Math.PI/8,   y: Math.PI/2,   z: 0 }  // rotación para que quede abierto y legible
   }
 
 };
