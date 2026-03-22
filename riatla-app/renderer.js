@@ -54,7 +54,7 @@ function setupScene() {
 
   // Ángulo reducido (10°) para acercar el plano facial sin distorsión
   camera = new THREE.PerspectiveCamera(
-    10,
+    15,
     window.innerWidth / window.innerHeight,
     0.1,
     1000
@@ -183,9 +183,9 @@ const WORLDS = {
   },
   DND: {
     path:     './world/Dnd/dnd.glb',
-    scale:    24,
-    rotation: Math.PI/2,
-    offset:   { x: 0, y: -0.8, z: 0 },
+    scale:    20,
+    rotation: 0,
+    offset:   { x: -6, y: -0.5, z: -4 },
     hdr:      './textures/space.hdr',           // ← añadir
     camera:   { pos: [3, 1.8, 6], lookAt: [0, 1.2, 0] }
   }
