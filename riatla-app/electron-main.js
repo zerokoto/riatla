@@ -13,6 +13,7 @@ function createWindow() {
     mainWindow = new BrowserWindow({
       width: 1920,
       height: 1080,
+      fullscreen: true,
       webPreferences: {
         nodeIntegration: false,
         contextIsolation: true,
@@ -24,7 +25,7 @@ function createWindow() {
     console.log('[Electron] Cargando:', indexPath);
     
     mainWindow.loadFile(indexPath);
-    mainWindow.webContents.openDevTools();
+    //mainWindow.webContents.openDevTools();
     
     mainWindow.on('closed', () => {
       console.log('[Electron] Ventana cerrada');
@@ -43,6 +44,9 @@ function createWindow() {
 
 app.on('ready', () => {
   console.log('[Electron] App ready');
+  globalShortcut.register('Escape', () => {
+    if (mainWindow) mainWindow.setFullScreen(false);
+  });
   createWindow();
 });
 

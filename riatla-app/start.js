@@ -5,12 +5,11 @@ let win;
 
 app.on('ready', () => {
   win = new BrowserWindow({
-    width: 800,
-    height: 600
+    fullscreen: true
   });
   
   win.loadFile('index.html');
-  win.webContents.openDevTools();
+  //win.webContents.openDevTools();
 });
 
 app.on('window-all-closed', () => {

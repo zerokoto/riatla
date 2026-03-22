@@ -142,7 +142,8 @@ echo [*] Arrancando Electron...
 echo.
 
 REM Ejecutar electron directamente en lugar de npm start para ver errores
-node_modules\electron\dist\electron.exe .
+REM node_modules\electron\dist\electron.exe .
+PowerShell -NoProfile -ExecutionPolicy Bypass -Command "& '.\node_modules\electron\dist\electron.exe' ."
 set EXITCODE=%ERRORLEVEL%
 
 echo.
@@ -152,4 +153,6 @@ if %EXITCODE% NEQ 0 (
 ) else (
     echo [*] Electron cerrado correctamente.
 )
-pause
+
+exit /b 0
+

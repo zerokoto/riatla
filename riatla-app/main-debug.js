@@ -13,6 +13,7 @@ app.on('ready', () => {
     mainWindow = new BrowserWindow({
       width: 1024,
       height: 768,
+      fullscreen: true,
       show: false,
       webPreferences: {
         nodeIntegration: false,
@@ -32,7 +33,7 @@ app.on('ready', () => {
       mainWindow.show();
     });
 
-    mainWindow.webContents.openDevTools();
+    //mainWindow.webContents.openDevTools();
     console.log('MAIN.JS: DevTools abierto');
 
     mainWindow.on('closed', () => {
