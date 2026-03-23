@@ -316,6 +316,12 @@ const OBJECTS = {
     scale:    0.1,
     position: { x: -0.25, y: 1.5, z: 0 },  // delante del avatar, a su altura
     rotation: { x: Math.PI/8,   y: Math.PI/2,   z: 0 }  // rotación para que quede abierto y legible
+  },
+  mando: {
+    path:     './props/controller.glb',
+    scale:    0.2,
+    position: { x: 0.135, y: 1.13, z: 0.3 },  // delante del avatar, a su altura
+    rotation: { x: 0,   y: Math.PI+Math.PI/8,   z: 0 }  // rotación para que quede abierto y legible
   }
 
 };
@@ -384,6 +390,34 @@ function addObjeto(nombre) {
           iniciarLerp();
         }, 900); // 900ms > duración del lerp (800ms)
       }
+
+      // Si es el mando, pose de sujetar con ambas manos
+      if (nombre === 'mando') {
+        if (miradaState.timer) clearTimeout(miradaState.timer);
+        miradaState.activa  = false;
+        miradaState.targetX =  0.18;  // ligeramente abajo (mirando el mando)
+        miradaState.targetY =  0.05;
+        musicaState._brazoIzqBloqueado  = true;
+        musicaState._brazoDchoBloqueado = true;
+
+        setTimeout(() => {
+          if (!objetosActivos[nombre]) return;
+
+          // Brazo Izquierdo: hombro elevado y hacia adelante, codo flexionado, mano mirando el mando
+          lerpHueso(currentVRM, 'leftShoulder', { x: 0.8280, y: -0.0780, z: 0.0000 });
+          lerpHueso(currentVRM, 'leftUpperArm', { x: 0.0960, y: -0.9260, z: -0.0200 });
+          lerpHueso(currentVRM, 'leftLowerArm', { x: -1.9860, y: -0.9060, z: -1.0990 });
+          lerpHueso(currentVRM, 'leftHand', { x: 0.0000, y: 0.0000, z: 0.0000 });
+
+          // Brazo Derecho: hombro elevado y hacia adelante, codo flexionado, mano mirando el mando
+          lerpHueso(currentVRM, 'rightShoulder', { x: 0.5580, y: -0.0390, z: 0.0000 });
+          lerpHueso(currentVRM, 'rightUpperArm', { x: 0.2120, y: 1.0020, z: 0.1340 });
+          lerpHueso(currentVRM, 'rightLowerArm', { x: -1.8890, y: 0.9250, z: 1.0980 });
+          lerpHueso(currentVRM, 'rightHand', { x: 0.1150, y: 0.0000, z: 0.0000 });
+
+          iniciarLerp();
+        }, 900);
+      }
     },
     undefined,
     (error) => log(`✗ Error cargando objeto ${nombre}: ${error.message}`)
@@ -424,6 +458,27 @@ function removeObjeto(nombre) {
         miradaState.activa  = true;
         programarSiguienteMirada();
       }
+    }
+  }
+
+  // Si era el mando, liberar ambos brazos
+  if (nombre === 'mando') {
+    musicaState._brazoIzqBloqueado  = false;
+    musicaState._brazoDchoBloqueado = false;
+
+    lerpHueso(currentVRM, 'leftUpperArm',  { x: 0, y: 0, z: -1.2 });
+    lerpHueso(currentVRM, 'rightUpperArm', { x: 0, y: 0, z:  1.2 });
+    lerpHueso(currentVRM, 'leftLowerArm',  { x: 0, y: 0, z: -0.2 });
+    lerpHueso(currentVRM, 'rightLowerArm', { x: 0, y: 0, z:  0.2 });
+    lerpHueso(currentVRM, 'leftHand',      { x: 0, y: 0, z:  0   });
+    lerpHueso(currentVRM, 'rightHand',     { x: 0, y: 0, z:  0   });
+    iniciarLerp();
+
+    if (expresionState.actual === 'neutral') {
+      miradaState.targetX = 0;
+      miradaState.targetY = 0;
+      miradaState.activa  = true;
+      programarSiguienteMirada();
     }
   }
 }
@@ -504,6 +559,20 @@ function poseClosed(vrm) {
 // ═══════════════════════════════════════════════════════════════════════════
 // ANIMACIÓN Y EXPRESIONES
 // ═══════════════════════════════════════════════════════════════════════════
+
+function publicarEstadoHuesos() {
+  if (!currentVRM) return;
+
+  const huesos = {};
+  for (const [nombre, bone] of Object.entries(currentVRM.humanoid.humanBones)) {
+    const r = bone.node.rotation;
+    // Three.js guarda quaternion; convertimos a Euler XYZ
+    const euler = new THREE.Euler().setFromQuaternion(r, 'XYZ');
+    huesos[nombre] = { x: euler.x, y: euler.y, z: euler.z };
+  }
+
+  mqttClient.publish('riatla/estado', JSON.stringify(huesos), { retain: true });
+}
 
 /**
  * Resetea todas las expresiones faciales a 0 y activa la indicada al 100%.
@@ -1248,8 +1317,10 @@ function animarObjetos() {
 
     // Flotación vertical
     const floatY = Math.sin(objetoTime       + seed) * 0.01;
-    // Flotación horizontal — frecuencia irracional respecto a Y
-    const floatX = Math.sin(objetoTime * 0.7 + seed + 1.3) * 0.01;
+
+    // Flotación horizontal — el mando no se mueve en X
+    const floatX = nombre === 'mando' ? 0 : Math.sin(objetoTime * 0.7 + seed + 1.3) * 0.01;
+
 
     obj.position.y = config.position.y + floatY;
     obj.position.x = config.position.x + floatX;
@@ -1596,7 +1667,7 @@ function animarMusica() {
     leftArm.rotation.z = -1.2 + swayArm               * 0.03  * mod1 * amp;
     leftArm.rotation.x =        Math.sin(t * 2 + 1.0) * 0.015 * mod2 * amp;
   }
-  if (rightArm) {
+  if (rightArm && !musicaState._brazoDchoBloqueado) {
     rightArm.rotation.z = 1.2 - swayArm               * 0.03  * mod1 * amp;
     rightArm.rotation.x =       Math.sin(t * 2)        * 0.015 * mod2 * amp;
   }
@@ -1606,7 +1677,7 @@ function animarMusica() {
   if (leftLower && !musicaState._brazoIzqBloqueado) {  // ← condición
     leftLower.rotation.z = -0.2 + swayLower * 0.02 * mod2 * amp;
   }
-  if (rightLower) {
+  if (rightLower && !musicaState._brazoDchoBloqueado) {
     rightLower.rotation.z = 0.2 - swayLower * 0.02 * mod2 * amp;
   }
 
@@ -1615,7 +1686,7 @@ function animarMusica() {
     leftHand.rotation.z = Math.sin(t * 2 + 1.2 + r1) * 0.03 * mod1 * amp;
     leftHand.rotation.x = Math.sin(t * 1.4 + r2)      * 0.02 * mod2 * amp;
   }
-  if (rightHand) {
+  if (rightHand && !musicaState._brazoDchoBloqueado) {
     rightHand.rotation.z = Math.sin(t * 2 + r2)         * 0.03 * mod1 * amp;
     rightHand.rotation.x = Math.sin(t * 1.4 + 0.8 + r3) * 0.02 * mod2 * amp;
   }
@@ -1906,4 +1977,5 @@ window.addEventListener('load', () => {
   loadWorld('TinyRoom');
   loadVRM();
   connectWebSocket();
+  publicarEstadoHuesos();
 });

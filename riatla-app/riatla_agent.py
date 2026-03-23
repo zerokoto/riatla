@@ -261,7 +261,7 @@ Entrada:
 ACCIONES RIATLA (tipo: "riatla")
 ═══════════════════════════════════════════════════════
   topic "emocion":      {"emocion": "happy|angry|sad|relaxed|surprised|neutral|closed", "duracion": 15}
-  topic "objeto":       {"objeto": "libro|musica|comida|bebida|timer|dnd", "accion": "add|remove"}
+  topic "objeto":       {"objeto": "libro|musica|comida|bebida|timer|dnd|mando", "accion": "add|remove"}
   topic "world/musica": {"estado": "on|off", "modo": "normal|metal"}
   topic "world/luz":    {"estado": "on|off"}
   topic "hueso":        {"huesos": [...], "duracion": 800, "lerp": true}
