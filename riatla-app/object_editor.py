@@ -37,6 +37,7 @@ OBJETOS = [
     "timer",
     "dnd",
     "mando",
+    "zzz"
 ]
 
 # Valores por defecto extraídos de renderer.js
@@ -48,6 +49,7 @@ DEFAULTS = {
     "timer":  {"pos": (-0.27,1.4,  0.0),  "rot": (0.0,       math.pi/16,            math.pi/8), "scale": 0.8   },
     "dnd":    {"pos": (-0.25,1.5,  0.0),  "rot": (math.pi/8, math.pi/2,             0.0),       "scale": 0.1   },
     "mando":  {"pos": (0.135,1.13, 0.3),  "rot": (0.0,       math.pi + math.pi/8,   0.0),       "scale": 0.2   },
+    "zzz":    {"pos": (0.147,1.13, 0.336), "rot": (0.0,       math.pi + math.pi/8,   0.0),       "scale": 0.2   },
 }
 
 # Colores (paleta Catppuccin Mocha — igual que bone_editor)

@@ -323,6 +323,12 @@ const OBJECTS = {
     scale:    0.2000,
     position: { x: 0.1470, y: 1.1300, z: 0.3360 },
     rotation: { x: 0.0000, y: -2.7030, z: 0.0000 }
+  },
+  zzz: {
+    path:     './props/zzz.glb',
+    scale:    0.0180,
+    position: { x: 0.1470, y: 1.6570, z: -0.1680 },
+    rotation: { x: 0.2630, y: 0.5710, z: 0.0000 }
   }
 
 };
