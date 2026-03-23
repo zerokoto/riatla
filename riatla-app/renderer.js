@@ -126,6 +126,7 @@ function loadVRM() {
       });
             
       currentVRM = vrm;
+      patchBlinkExpression(vrm);
       scene.add(vrm.scene);
       vrm.scene.rotation.y = Math.PI / 7;
       aplicarPoseReposo(vrm);
@@ -1550,6 +1551,66 @@ function esperar(ms) {
 }
 
 /**
+ * Elimina los morph targets de boca que se activan accidentalmente
+ * al parpadear (error común en modelos VRM donde el BlendShapeGroup
+ * BLINK incluye morph targets de boca por error de autoría).
+ * Detecta morfos problemáticos de dos formas:
+ *   1. Intersección con los morph binds de expresiones de boca (aa/ih/ou/ee/oh)
+ *   2. Búsqueda por nombre de morph target (jaw, mouth, lip…)
+ * Se llama una sola vez justo tras cargar el modelo.
+ */
+function patchBlinkExpression(vrm) {
+  const manager = vrm.expressionManager;
+  if (!manager) return;
+
+  // ── 1. Recopilar índices de morph usados por expresiones de boca ──────────
+  const mouthKeys = new Set();
+  ['aa', 'ih', 'ou', 'ee', 'oh'].forEach(name => {
+    const exp = manager.getExpression(name);
+    if (!exp) return;
+    const binds = exp._morphTargetBinds ?? exp._binds ?? exp.binds ?? [];
+    binds.forEach(b => {
+      (b.primitives ?? b.meshes ?? []).forEach(m => {
+        mouthKeys.add(`${m.uuid}:${b.index}`);
+      });
+    });
+  });
+
+  // ── 2. Detección por nombre de morph target (fallback) ────────────────────
+  const mouthKeywords = ['mouth', 'jaw', 'lip', 'boca', 'aa', 'ih', 'ou', 'ee', 'oh'];
+  vrm.scene.traverse(obj => {
+    if (!obj.isSkinnedMesh || !obj.morphTargetDictionary) return;
+    Object.entries(obj.morphTargetDictionary).forEach(([name, idx]) => {
+      if (mouthKeywords.some(kw => name.toLowerCase().includes(kw))) {
+        mouthKeys.add(`${obj.uuid}:${idx}`);
+      }
+    });
+  });
+
+  if (mouthKeys.size === 0) return;
+
+  // ── 3. Filtrar de blink / blinkLeft / blinkRight ───────────────────────────
+  let patched = 0;
+  ['blink', 'blinkLeft', 'blinkRight'].forEach(name => {
+    const exp = manager.getExpression(name);
+    if (!exp) return;
+    const key = '_morphTargetBinds' in exp ? '_morphTargetBinds'
+              : '_binds'            in exp ? '_binds'
+              : 'binds';
+    if (!exp[key]?.length) return;
+    const before = exp[key].length;
+    exp[key] = exp[key].filter(b =>
+      !(b.primitives ?? b.meshes ?? []).some(m =>
+        mouthKeys.has(`${m.uuid}:${b.index}`)
+      )
+    );
+    patched += before - exp[key].length;
+  });
+
+  if (patched > 0) log(`✓ Blink patch: ${patched} morph(s) de boca eliminados`);
+}
+
+/**
  * Activa o desactiva la animación de parpadeo autónomo.
  * @param {boolean} activar
  */
@@ -1662,8 +1723,15 @@ function animarMusica() {
   if (chest) chest.rotation.z = -Math.sin(t * 0.9 + 0.4) * 0.02 * mod3 * amp;
 
   // ── Brazos superiores ─────────────────────────────────────────────────────
+  const leftArm  = humanoid.getNormalizedBoneNode('leftUpperArm');
+  const rightArm = humanoid.getNormalizedBoneNode('rightUpperArm');
+  const leftLower  = humanoid.getNormalizedBoneNode('leftLowerArm');
+  const rightLower = humanoid.getNormalizedBoneNode('rightLowerArm');
+  const leftHand   = humanoid.getNormalizedBoneNode('leftHand');
+  const rightHand  = humanoid.getNormalizedBoneNode('rightHand');
+
   const swayArm = Math.sin(t + Math.PI);
-  if (leftArm && !musicaState._brazoIzqBloqueado) {  // ← condición
+  if (leftArm && !musicaState._brazoIzqBloqueado) {
     leftArm.rotation.z = -1.2 + swayArm               * 0.03  * mod1 * amp;
     leftArm.rotation.x =        Math.sin(t * 2 + 1.0) * 0.015 * mod2 * amp;
   }
@@ -1674,7 +1742,7 @@ function animarMusica() {
 
   // ── Antebrazos ────────────────────────────────────────────────────────────
   const swayLower = Math.sin(t * 1.5 + 0.5);
-  if (leftLower && !musicaState._brazoIzqBloqueado) {  // ← condición
+  if (leftLower && !musicaState._brazoIzqBloqueado) {
     leftLower.rotation.z = -0.2 + swayLower * 0.02 * mod2 * amp;
   }
   if (rightLower && !musicaState._brazoDchoBloqueado) {
@@ -1682,7 +1750,7 @@ function animarMusica() {
   }
 
   // ── Muñecas ───────────────────────────────────────────────────────────────
-  if (leftHand && !musicaState._brazoIzqBloqueado) {  // ← condición
+  if (leftHand && !musicaState._brazoIzqBloqueado) {
     leftHand.rotation.z = Math.sin(t * 2 + 1.2 + r1) * 0.03 * mod1 * amp;
     leftHand.rotation.x = Math.sin(t * 1.4 + r2)      * 0.02 * mod2 * amp;
   }
