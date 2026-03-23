@@ -318,7 +318,8 @@ REGLAS DE COMPORTAMIENTO:
 9. NUNCA apagues la luz de una habitación donde la sección RELACIÓN PRESENCIA↔LUZ indica presencia=on.
 10. Antes de emitir cualquier turn_off de una luz, comprueba en RELACIÓN PRESENCIA↔LUZ que esa habitación tiene presencia=off. Si hay presencia, omite la acción.
 11. El proyector se ve desde el sofa y a oscuras. Si detectas presencia en el sofá durante un tiempo, puedes encender el proyector, pero NUNCA si no hay presencia en el sofá.
-12. ACCIONES INTRUSIVAS: poner música (media_player media_play/play_media), encender el proyector (switch.socket_proyector_switch turn_on) y activar el baile de Riatla (world/musica on) son intrusivas. Inclúyelas en "acciones" con normalidad — el sistema las interceptará automáticamente para pedir confirmación al usuario antes de ejecutarlas.
+12. ACCIONES INTRUSIVAS (requieren confirmación): poner música (media_player media_play/play_media) y encender el proyector (switch.socket_proyector_switch turn_on). Inclúyelas en "acciones" con normalidad — el sistema pedirá confirmación automáticamente.
+13. Las acciones de Riatla (emociones, objetos, baile, mundo) NO son intrusivas. Riatla puede hacer lo que quiera sin pedir permiso.
 
 ESTRUCTURA DE RESPUESTA (JSON estricto):
 {{
@@ -853,11 +854,13 @@ ACCIONES_INTRUSIVAS_CHECK = [
         and a.get("servicio") == "turn_on"
         and "proyector" in str(a.get("datos", {}).get("entity_id", ""))
     ),
-    # Baile de Riatla
+    # Apagar luces cuando hay presencia (protección extra)
     lambda a: (
-        a.get("tipo") == "riatla"
-        and a.get("topic") == "world/musica"
-        and a.get("datos", {}).get("estado") == "on"
+        a.get("tipo") == "ha"
+        and a.get("dominio") == "light"
+        and a.get("servicio") == "turn_off"
+        and contexto_ha.get(a.get("datos", {}).get("entity_id", ""), {}).get("valor") in ("on", "unavailable")
+        and _presencia_en_habitacion_de_luz(a.get("datos", {}).get("entity_id", ""))
     ),
 ]
 
@@ -870,6 +873,19 @@ def es_accion_intrusiva(accion: dict) -> bool:
     return any(check(accion) for check in ACCIONES_INTRUSIVAS_CHECK)
 
 
+def _presencia_en_habitacion_de_luz(entity_id: str) -> bool:
+    """Devuelve True si la habitación asociada a esa luz tiene presencia activa."""
+    mapa = {
+        "light.estudio":    "binary_sensor.grupopresenciaestudiokevin",
+        "light.salon":      "binary_sensor.grupopresenciasalon",
+        "light.habitacion": "binary_sensor.grupopresenciadormitorio",
+    }
+    sensor = mapa.get(entity_id)
+    if not sensor:
+        return False
+    return contexto_ha.get(sensor, {}).get("valor") == "on"
+
+
 def _describir_accion(accion: dict) -> str:
     if accion.get("tipo") == "ha":
         dominio = accion.get("dominio", "")
@@ -878,10 +894,9 @@ def _describir_accion(accion: dict) -> str:
             return "¿Quieres que ponga música en el estudio?"
         if "proyector" in entity:
             return "¿Quieres que encienda el proyector del salón?"
-    if accion.get("tipo") == "riatla" and accion.get("topic") == "world/musica":
-        modo = accion.get("datos", {}).get("modo", "normal")
-        return f"¿Quieres que Riatla empiece a bailar? (modo {modo})"
-    return f"¿Confirmas la acción: {accion.get('topic') or accion.get('servicio', '')}?"
+        if dominio == "light" and accion.get("servicio") == "turn_off":
+            return f"¿Apago la luz de {entity}? Parece que hay presencia."
+    return f"¿Confirmas la acción: {accion.get('dominio','')}.{accion.get('servicio','')} ({accion.get('datos',{}).get('entity_id','')})?"
 
 
 def _limpiar_pendiente():
@@ -991,6 +1006,26 @@ def on_confirmar_mqtt(client, userdata, msg):
 COOLDOWN_SEGUNDOS = 120  # mínimo tiempo entre la misma acción
 _ultima_accion    = {}   # { "topic:valor": timestamp }
 
+# ── Estado idle de Riatla ──────────────────────────────────────────────────────
+# Seguimiento de la última vez que Riatla hizo algo visible, para detectar
+# tiempos muertos y programar actividades autónomas.
+
+UMBRAL_OCIO_S               = 180   # 3 min sin actividad → actividad idle
+UMBRAL_MUSICA_S             = 900   # 15 min en estudio silencioso → proponer música
+COOLDOWN_PROPUESTA_MUSICA_S = 2700  # 45 min entre propuestas de música
+INTERVALO_CHECK_IDLE        = 60    # revisar estado idle cada 60 s
+DURACION_ACTIVIDAD_IDLE_S   = 420   # 7 min con un objeto idle activo
+
+_ultima_actividad_riatla_ts = [time.time()]  # lista para mutación en closure
+_cooldown_propuesta_musica  = [0.0]
+_riatla_emocion_actual      = ["neutral"]    # emoción actual conocida de Riatla
+
+ACTIVIDADES_IDLE = [
+    ("libro",  {"objeto": "libro",  "accion": "add"}),
+    ("comida", {"objeto": "comida", "accion": "add"}),
+    ("bebida", {"objeto": "bebida", "accion": "add"}),
+]
+
 def accion_en_cooldown(topic: str, valor: str) -> bool:
     clave = f"{topic}:{valor}"
     ahora = time.time()
@@ -1037,6 +1072,12 @@ def riatla_enviar(topic_sufijo: str, payload: dict):
     _mqtt_client.publish(topic, mensaje)
     print(f"[Riatla] → {topic}: {mensaje}")
 
+    # Registrar actividad visible (excluir resets de mirada que no son perceptibles)
+    if topic_sufijo in ("emocion", "objeto", "world/musica"):
+        _ultima_actividad_riatla_ts[0] = time.time()
+    if topic_sufijo == "emocion":
+        _riatla_emocion_actual[0] = payload.get("emocion", "neutral")
+
 # ── MQTT (solo para enviar a Riatla + escuchar confirmaciones) ─────────────────
 
 def _on_mqtt_connect(client, userdata, flags, rc):
@@ -1059,6 +1100,87 @@ def iniciar_mqtt():
     client.connect(MQTT_HOST, MQTT_PORT, keepalive=60)
     client.loop_start()
     _mqtt_client = client
+
+# ── Loop de actividad idle ─────────────────────────────────────────────────────
+# Hilo independiente del LLM. Cuando Riatla lleva tiempo sin hacer nada visible
+# y alguien está en casa, la pone a hacer actividades autónomas (leer, comer,
+# beber). Si hay presencia en el estudio sin música un rato, propone ponerla.
+
+def loop_actividad_idle():
+    import random
+    print("[Idle] Loop de actividad idle iniciado")
+    while True:
+        time.sleep(INTERVALO_CHECK_IDLE)
+        try:
+            _check_idle_activity(random)
+        except Exception as e:
+            print(f"[Idle] Error: {e}")
+
+
+def _check_idle_activity(random):
+    import random as _random
+    if random is None:
+        random = _random
+
+    ahora = time.time()
+    tiempo_inactivo = ahora - _ultima_actividad_riatla_ts[0]
+
+    # No actuar si Riatla está en una emoción no neutral
+    if _riatla_emocion_actual[0] not in ("neutral", "relaxed", "happy"):
+        return
+
+    # No actuar si no hay nadie en casa
+    with _lock:
+        kevin_home     = contexto_ha.get("person.kevin",  {}).get("valor") == "home"
+        sandra_home    = contexto_ha.get("person.sandra", {}).get("valor") == "home"
+        en_estudio     = contexto_ha.get("binary_sensor.grupopresenciaestudiokevin", {}).get("valor") == "on"
+        musica_playing = contexto_ha.get("media_player.havoice_estudio_media_player_2", {}).get("valor") == "playing"
+
+    if not kevin_home and not sandra_home:
+        return
+
+    # Proponer música si Kevin está en el estudio en silencio un rato
+    if (en_estudio
+            and not musica_playing
+            and tiempo_inactivo > UMBRAL_MUSICA_S
+            and ahora - _cooldown_propuesta_musica[0] > COOLDOWN_PROPUESTA_MUSICA_S
+            and not _accion_pendiente["accion"]):
+        _proponer_musica()
+        _cooldown_propuesta_musica[0] = ahora  # cooldown independientemente de la respuesta
+        return
+
+    # Actividad idle aleatoria si lleva suficiente tiempo sin hacer nada
+    if tiempo_inactivo > UMBRAL_OCIO_S:
+        _actividad_idle_aleatoria(random)
+
+
+def _actividad_idle_aleatoria(random):
+    """Elige una actividad idle al azar y la envía directamente sin LLM."""
+    nombre, datos = random.choice(ACTIVIDADES_IDLE)
+    print(f"[Idle] Actividad autónoma: {nombre}")
+    riatla_enviar("objeto", datos)
+
+    # Quitar el objeto después de DURACION_ACTIVIDAD_IDLE_S
+    def _quitar():
+        print(f"[Idle] Retirando objeto idle: {nombre}")
+        riatla_enviar("objeto", {"objeto": nombre, "accion": "remove"})
+
+    t = threading.Timer(DURACION_ACTIVIDAD_IDLE_S, _quitar)
+    t.daemon = True
+    t.start()
+
+
+def _proponer_musica():
+    """Propone poner música usando el sistema de confirmación existente."""
+    print("[Idle] Proponiendo música (estudio silencioso)")
+    accion_musica = {
+        "tipo":     "ha",
+        "dominio":  "media_player",
+        "servicio": "media_play",
+        "datos":    {"entity_id": "media_player.havoice_estudio_media_player_2"}
+    }
+    solicitar_confirmacion(accion_musica)
+
 
 # ── Revisión periódica ─────────────────────────────────────────────────────────
 
@@ -1117,6 +1239,9 @@ def main():
 
     # Revisión periódica en hilo propio
     threading.Thread(target=loop_revision_periodica, daemon=True).start()
+
+    # Loop de actividad idle (autónomo, sin LLM)
+    threading.Thread(target=loop_actividad_idle, daemon=True).start()
 
     # SSE en hilo propio — bloquea hasta reconexión
     #sse_thread = threading.Thread(target=escuchar_eventos_sse, daemon=True)

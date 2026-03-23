@@ -89,14 +89,14 @@ echo [OK] Daemon arrancado en ventana separada.
 echo.
 
 REM ── Preguntar por el agente IA ──────────────────────────────────────────
-set /p AGENTE="¿Arrancar tambien el agente de IA (riatla_agent.py)? (S/N): "
-if /i "%AGENTE%"=="S" (
+REM set /p AGENTE="¿Arrancar tambien el agente de IA (riatla_agent.py)? (S/N): "
+REM if /i "%AGENTE%"=="S" (
     echo [*] Arrancando riatla_agent.py...
     start "Riatla Agent" cmd /k "python riatla_agent.py"
     echo [OK] Agente IA arrancado en ventana separada.
-) else (
-    echo [*] Agente IA omitido.
-)
+REM ) else (
+REM     echo [*] Agente IA omitido.
+REM )
 echo.
 
 REM ── Pequeña pausa para que el daemon se conecte antes de Electron ───────
