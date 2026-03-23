@@ -482,7 +482,24 @@ function aplicarPoseReposo(vrm) {
 
 }
 
+function poseClosed(vrm) {
+  const lado = Math.random() < 0.5 ? 1 : -1;
 
+  // Cabeza inclinada hacia adelante (dormida)
+  lerpHueso(vrm, 'head', { x:  0.25, y: lado * 0.05, z: lado * 0.03 });
+  lerpHueso(vrm, 'neck', { x:  0.20, y: 0,           z: 0            });
+
+  // Brazos completamente caídos y relajados
+  lerpHueso(vrm, 'leftUpperArm',  { x:  0.1, y: 0, z: -1.4 });
+  lerpHueso(vrm, 'rightUpperArm', { x:  0.1, y: 0, z:  1.4 });
+  lerpHueso(vrm, 'leftLowerArm',  { x:  0,   y: 0, z: -0.1 });
+  lerpHueso(vrm, 'rightLowerArm', { x:  0,   y: 0, z:  0.1 });
+  lerpHueso(vrm, 'leftHand',      { x:  0.1, y: 0, z:  0   });
+  lerpHueso(vrm, 'rightHand',     { x:  0.1, y: 0, z:  0   });
+
+  iniciarLerp();
+  removeAllObjetos();
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // ANIMACIÓN Y EXPRESIONES
@@ -499,7 +516,7 @@ function activarExpresion(nombre) {
   const exp = currentVRM.expressionManager;
 
   // three-vrm 3.x: usar getExpressionTrackName para listar, o resetear manualmente
-  const expresiones = ['happy', 'angry', 'sad', 'relaxed', 'surprised', 'neutral'];
+  const expresiones = ['happy', 'angry', 'sad', 'relaxed', 'surprised', 'neutral','closed'];
   expresiones.forEach(name => {
     try { exp.setValue(name, 0); } catch(e) {}
   });
@@ -858,6 +875,68 @@ function desactivarRelaxed() {
   log('Expresión: neutral (desde relaxed)');
 }
 
+
+
+
+// ── Pose closed ──────────────────────────────────────────────────────────
+
+
+function activarClosed(duracionSegundos = 60) {
+  if (!currentVRM) return;
+
+  if (expresionState.timerReset) {
+    clearTimeout(expresionState.timerReset);
+    expresionState.timerReset = null;
+  }
+
+  if (musicaState.activa && musicaState.modo === 'metal') {
+    musicaState.modo = 'normal';
+  }
+
+  // Pausar parpadeo — los ojos ya están cerrados
+  animacion_parpadeo(false);  // ← añadir
+  // Pausar mirada
+  miradaState.activa   = false;
+  miradaState.targetX  = 0;
+  miradaState.targetY  = 0;
+  miradaState.currentX = 0;
+  miradaState.currentY = 0;
+  miradaState.bloqueada = true;
+
+  setTimeout(() => {
+    miradaState.bloqueada = false;
+  }, 900);
+
+  activarExpresion('closed');
+  poseClosed(currentVRM);
+
+  expresionState.actual = 'closed';
+  log(`Expresión: closed (${duracionSegundos}s)`);
+
+  expresionState.timerReset = setTimeout(() => {
+    desactivarClosed();
+  }, duracionSegundos * 1000);
+}
+
+function desactivarClosed() {
+  if (!currentVRM) return;
+  activarExpresion('neutral');
+  poseNeutral(currentVRM);
+
+  miradaState.targetX  = 0;
+  miradaState.targetY  = 0;
+  miradaState.currentX = 0;
+  miradaState.currentY = 0;
+  miradaState.bloqueada = false;
+
+  // Reactivar parpadeo al despertar
+  animacion_parpadeo(true);   // ← añadir
+  miradaState.activa = true;
+  programarSiguienteMirada();
+
+  expresionState.actual = 'neutral';
+  log('Expresión: neutral (desde closed)');
+}
 
 // ── Pose surprised ──────────────────────────────────────────────────────────
 
@@ -1564,6 +1643,10 @@ function ejecutarComando(comando) {
       
     case 'emocion_relaxed':
       activarRelaxed(parametros.duracion ?? 10);
+      break;
+
+    case 'emocion_closed':
+      activarClosed(parametros.duracion ?? 10);
       break;
 
     case 'pose_reposo':

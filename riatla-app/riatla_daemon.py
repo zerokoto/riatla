@@ -68,7 +68,7 @@ TOPIC_OBJETO     = "riatla/objeto"
 TOPIC_HA         = "homeassistant/#"  # para futuras integraciones específicas con HA
 
 # Deben coincidir exactamente con los case de ejecutarComando() en renderer.js
-EMOCIONES_VALIDAS = {"happy", "angry", "sad", "relaxed", "surprised", "neutral"}
+EMOCIONES_VALIDAS = {"happy", "angry", "sad", "relaxed", "surprised", "neutral", "closed"}
 
 # ── Estado interno ─────────────────────────────────────────────────────────────
 # Compartido entre el hilo MQTT y el hilo WS.
