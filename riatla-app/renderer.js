@@ -547,9 +547,9 @@ function aplicarPoseReposo(vrm) {
 function poseClosed(vrm) {
   const lado = Math.random() < 0.5 ? 1 : -1;
 
-  // Cabeza inclinada hacia adelante (dormida)
-  lerpHueso(vrm, 'head', { x:  0.25, y: lado * 0.05, z: lado * 0.03 });
-  lerpHueso(vrm, 'neck', { x:  0.20, y: 0,           z: 0            });
+  // Cabeza caída hacia adelante (dormida)
+  lerpHueso(vrm, 'head', { x:  0.35, y: lado * 0.05, z: lado * 0.03 });
+  lerpHueso(vrm, 'neck', { x:  0.28, y: 0,           z: 0            });
 
   // Brazos completamente caídos y relajados
   lerpHueso(vrm, 'leftUpperArm',  { x:  0.1, y: 0, z: -1.4 });
@@ -560,7 +560,6 @@ function poseClosed(vrm) {
   lerpHueso(vrm, 'rightHand',     { x:  0.1, y: 0, z:  0   });
 
   iniciarLerp();
-  removeAllObjetos();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1103,8 +1102,11 @@ function activarClosed(duracionSegundos = 60) {
     musicaState.modo = 'normal';
   }
 
+  // Limpiar cualquier prop activo antes de dormir
+  removeAllObjetos();
+
   // Pausar parpadeo — los ojos ya están cerrados
-  animacion_parpadeo(false);  // ← añadir
+  animacion_parpadeo(false);
   // Pausar mirada
   miradaState.activa   = false;
   miradaState.targetX  = 0;
@@ -1120,6 +1122,11 @@ function activarClosed(duracionSegundos = 60) {
   activarExpresion('closed');
   poseClosed(currentVRM);
 
+  // Añadir el zzz tras la pose (espera al lerp)
+  setTimeout(() => {
+    if (expresionState.actual === 'closed') addObjeto('zzz');
+  }, 950);
+
   expresionState.actual = 'closed';
   log(`Expresión: closed (${duracionSegundos}s)`);
 
@@ -1130,6 +1137,10 @@ function activarClosed(duracionSegundos = 60) {
 
 function desactivarClosed() {
   if (!currentVRM) return;
+
+  // Quitar el zzz al despertar
+  if (objetosActivos['zzz']) removeObjeto('zzz');
+
   activarExpresion('neutral');
   poseNeutral(currentVRM);
 
@@ -1140,7 +1151,7 @@ function desactivarClosed() {
   miradaState.bloqueada = false;
 
   // Reactivar parpadeo al despertar
-  animacion_parpadeo(true);   // ← añadir
+  animacion_parpadeo(true);
   miradaState.activa = true;
   programarSiguienteMirada();
 

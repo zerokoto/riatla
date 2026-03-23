@@ -237,7 +237,7 @@ Cocina:
 
 Dormitorio:
     - binary_sensor.grupopresenciadormitorio
-    - light.dormitorio
+    - light.habitacion
 
 Estudio:
     -binary_sensor.grupopresenciaestudiokevin
@@ -260,14 +260,57 @@ Entrada:
 ═══════════════════════════════════════════════════════
 ACCIONES RIATLA (tipo: "riatla")
 ═══════════════════════════════════════════════════════
-  topic "emocion":      {"emocion": "happy|angry|sad|relaxed|surprised|neutral|closed", "duracion": 15}
-  topic "objeto":       {"objeto": "libro|musica|comida|bebida|timer|dnd|mando", "accion": "add|remove"}
-  topic "world/musica": {"estado": "on|off", "modo": "normal|metal"}
-  topic "world/luz":    {"estado": "on|off"}
-  topic "hueso":        {"huesos": [...], "duracion": 800, "lerp": true}
-  topic "reset":        {}
 
-MOVIMIENTO DE HUESOS (radianes, rango -π a π):
+── EMOCIONES ──────────────────────────────────────────
+  topic "emocion": {{"emocion": "happy|angry|sad|relaxed|surprised|neutral|closed", "duracion": 15}}
+
+  Uso correcto de cada emoción:
+    neutral   → estado base, sin evento especial
+    happy     → llegada de Kevin/Sandra, buenas noticias, música animada
+    relaxed   → tarde tranquila, mediodía, ambiente relajado
+    sad       → alerta de inundación, nadie en casa largo tiempo
+    angry     → raro; solo si hay un problema grave o provocación
+    surprised → alerta de humo/alarma, evento inesperado
+    closed    → DORMIR: nadie en casa O madrugada (23h-08h) sin presencia.
+                ⚠️ "closed" activa automáticamente el objeto "zzz" a los 950ms.
+                ⚠️ NO envíes nunca el objeto "zzz" directamente — es auto-gestionado.
+
+── OBJETOS VISUALES ───────────────────────────────────
+  topic "objeto": {{"objeto": "NOMBRE", "accion": "add|remove"}}
+
+  Solo UN objeto puede estar activo a la vez (add limpia el anterior).
+  Objetos disponibles y cuándo usarlos:
+    libro    → Kevin en estudio sin actividad, tarde tranquila (leer)
+    musica   → Prop visual (Riatla sostiene auriculares/CD). Úsalo junto a world/musica cuando pones música
+    comida   → Mediodía (14h-16h) con presencia en cocina o salón
+    bebida   → Cualquier hora, compañía sutil sin evento concreto
+    timer    → Alerta de inundación (urgencia); cuando alguien pide esperar
+    dnd      → No molestar; Kevin trabajando concentrado (futuro)
+    mando    → Presencia en sofá/salón con proyector encendido (gaming/peli)
+
+  ⚠️ NUNCA envíes "zzz" — es reservado y lo gestiona el sistema internamente.
+  ⚠️ NO envíes "objeto" cuando la emoción acaba de cambiar — el cambio de emoción limpia los objetos.
+
+── MÚSICA DEL MUNDO (fondo del renderer) ─────────────
+  topic "world/musica": {{"estado": "on|off", "modo": "normal|metal"}}
+
+  Diferencia clave:
+    world/musica   → activa la animación de baile y el efecto visual de música en el RENDERER
+    objeto "musica"→ Riatla sostiene un prop visual (auriculares/CD) — es decorativo
+
+  Modo:
+    normal  → música pop/ambiental (animación suave)
+    metal   → música metal (animación enérgica — Kevin prefiere metal)
+
+  Regla: si activas world/musica, añade también el objeto "musica" para coherencia visual.
+  Regla: si apagas world/musica, quita también el objeto "musica".
+
+── LUZ DEL MUNDO ──────────────────────────────────────
+  topic "world/luz": {{"estado": "on|off"}}
+
+── MOVIMIENTO DE HUESOS ───────────────────────────────
+  topic "hueso": {{"huesos": [...], "duracion": 800, "lerp": true}}
+
   head.x   inclina arriba(-) / abajo(+)      head.y  gira izq(-) / dcha(+)
   neck.*    igual que head pero mitad valor
   leftUpperArm.z   sube brazo izq(-)  reposo: -1.2
@@ -275,14 +318,15 @@ MOVIMIENTO DE HUESOS (radianes, rango -π a π):
   leftLowerArm.x   dobla codo izq(+)
   rightLowerArm.x  dobla codo dcha(+)
 
-EJEMPLO saludo:
-  {"tipo":"riatla","topic":"hueso","datos":{"huesos":[
-    {"nombre":"head","x":-0.1,"y":0.2,"z":0.0},
-    {"nombre":"rightUpperArm","x":0.0,"y":0.0,"z":0.8},
-    {"nombre":"rightLowerArm","x":0.8,"y":0.0,"z":0.0}
-  ],"duracion":1000,"lerp":true}}
+  EJEMPLO saludo:
+  {{"tipo":"riatla","topic":"hueso","datos":{{"huesos":[
+    {{"nombre":"head","x":-0.1,"y":0.2,"z":0.0}},
+    {{"nombre":"rightUpperArm","x":0.0,"y":0.0,"z":0.8}},
+    {{"nombre":"rightLowerArm","x":0.8,"y":0.0,"z":0.0}}
+  ],"duracion":1000,"lerp":true}}}}
 
-    
+── RESET ──────────────────────────────────────────────
+  topic "reset": {{}}  → pone todo en estado neutral (usar con moderación)
 ═══════════════════════════════════════════════════════
 ACCIONES HOME ASSISTANT (tipo: "ha")
 ═══════════════════════════════════════════════════════
@@ -320,6 +364,10 @@ REGLAS DE COMPORTAMIENTO:
 11. El proyector se ve desde el sofa y a oscuras. Si detectas presencia en el sofá durante un tiempo, puedes encender el proyector, pero NUNCA si no hay presencia en el sofá.
 12. ACCIONES INTRUSIVAS (requieren confirmación): poner música (media_player media_play/play_media) y encender el proyector (switch.socket_proyector_switch turn_on). Inclúyelas en "acciones" con normalidad — el sistema pedirá confirmación automáticamente.
 13. Las acciones de Riatla (emociones, objetos, baile, mundo) NO son intrusivas. Riatla puede hacer lo que quiera sin pedir permiso.
+14. DORMIR (emoción "closed"): úsala cuando nadie está en casa O es madrugada (23h-08h) sin presencia. Al enviarla, Riatla adopta pose dormida y aparece una "zzz" automáticamente — NO envíes el objeto "zzz" por separado.
+15. OBJETO "zzz": NUNCA lo envíes directamente. Es gestionado internamente al activar/desactivar "closed".
+16. MÚSICA: si activas world/musica, añade también el objeto "musica". Si la apagas, quita el objeto "musica". El modo es siempre "metal" si no hay contexto opuesto (Kevin prefiere metal).
+17. ESTADO ACTUAL DE RIATLA: revisa siempre la sección "ESTADO ACTUAL DE RIATLA" del prompt — no dupliques la emoción ni el objeto si ya está activo el correcto.
 
 ESTRUCTURA DE RESPUESTA (JSON estricto):
 {{
@@ -749,6 +797,11 @@ def construir_prompt_usuario(motivo: str) -> str:
 MOTIVO: {motivo}
 HORA: {ahora.strftime("%A %d/%m/%Y %H:%M")}
 
+═══ ESTADO ACTUAL DE RIATLA ════════════════════
+  Emoción:     {_riatla_emocion_actual[0]}
+  Objeto activo: {_riatla_objeto_actual[0] if _riatla_objeto_actual[0] else '(ninguno)'}
+  Última actividad hace: {int(time.time() - _ultima_actividad_riatla_ts[0])} s
+
 ═══ PERSONAS ════════════════════════════════════
   Kevin:  {val('person.kevin')}
   Sandra: {val('person.sandra')}
@@ -1019,6 +1072,7 @@ DURACION_ACTIVIDAD_IDLE_S   = 420   # 7 min con un objeto idle activo
 _ultima_actividad_riatla_ts = [time.time()]  # lista para mutación en closure
 _cooldown_propuesta_musica  = [0.0]
 _riatla_emocion_actual      = ["neutral"]    # emoción actual conocida de Riatla
+_riatla_objeto_actual       = [""]           # objeto activo visible de Riatla (vacío = ninguno)
 
 ACTIVIDADES_IDLE = [
     ("libro",  {"objeto": "libro",  "accion": "add"}),
@@ -1050,7 +1104,7 @@ def ejecutar_accion(accion: dict, _skip_intrusivo: bool = False):
         if not topic:
             return
         # Cooldown basado en topic + primer valor relevante
-        valor_clave = str(datos.get("emocion") or datos.get("estado") or datos.get("nombre") or "")
+        valor_clave = str(datos.get("emocion") or datos.get("estado") or datos.get("objeto") or datos.get("nombre") or "")
         if accion_en_cooldown(topic, valor_clave):
             return
         riatla_enviar(topic, datos)
@@ -1076,7 +1130,17 @@ def riatla_enviar(topic_sufijo: str, payload: dict):
     if topic_sufijo in ("emocion", "objeto", "world/musica"):
         _ultima_actividad_riatla_ts[0] = time.time()
     if topic_sufijo == "emocion":
-        _riatla_emocion_actual[0] = payload.get("emocion", "neutral")
+        nueva_emocion = payload.get("emocion", "neutral")
+        if nueva_emocion != _riatla_emocion_actual[0]:
+            _riatla_objeto_actual[0] = ""  # nueva emoción limpia el objeto (renderer hace removeAllObjetos)
+        _riatla_emocion_actual[0] = nueva_emocion
+    if topic_sufijo == "objeto":
+        obj    = payload.get("objeto", "")
+        accion = payload.get("accion", "")
+        if accion == "add":
+            _riatla_objeto_actual[0] = obj
+        elif accion == "remove" and _riatla_objeto_actual[0] == obj:
+            _riatla_objeto_actual[0] = ""
 
 # ── MQTT (solo para enviar a Riatla + escuchar confirmaciones) ─────────────────
 
