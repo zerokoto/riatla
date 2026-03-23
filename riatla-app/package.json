@@ -26,7 +26,7 @@
     "appId": "com.riatla.app",
     "productName": "Riatla Avatar",
     "files": [
-      "electron-main.js",
+      "electron-main-log.js",
       "preload.js",
       "index.html",
       "renderer.js",

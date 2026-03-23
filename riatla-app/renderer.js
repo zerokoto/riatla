@@ -626,6 +626,38 @@ function poseNeutral(vrm) {
   iniciarLerp();
 }
 
+// ── Neutral: reset completo a estado base ──────────────────────────────────
+
+/**
+ * Revierte cualquier emoción activa: expresión + pose + parpadeo + mirada idle.
+ * Puede llamarse desde cualquier estado para volver a la base.
+ */
+function activarNeutral() {
+  if (!currentVRM) return;
+
+  if (expresionState.timerReset) {
+    clearTimeout(expresionState.timerReset);
+    expresionState.timerReset = null;
+  }
+
+  // Reactivar parpadeo si estaba desactivado (p.ej. desde closed)
+  if (!parpadeoState.activo) animacion_parpadeo(true);
+
+  activarExpresion('neutral');
+  poseNeutral(currentVRM);
+
+  miradaState.targetX  = 0;
+  miradaState.targetY  = 0;
+  miradaState.currentX = 0;
+  miradaState.currentY = 0;
+  miradaState.bloqueada = false;
+  miradaState.activa   = true;
+  programarSiguienteMirada();
+
+  expresionState.actual = 'neutral';
+  log('Expresión: neutral');
+}
+
 // ── Pose angry ─────────────────────────────────────────────────────────────
 /**
  * Brazos cruzados, cabeza levantada y girada a un lado aleatorio.
@@ -683,25 +715,32 @@ function poseAngry(vrm) {
 function activarAngry(duracionSegundos = 10) {
   if (!currentVRM) return;
 
-  // Cancelar reset anterior si existe
   if (expresionState.timerReset) {
     clearTimeout(expresionState.timerReset);
     expresionState.timerReset = null;
   }
 
-  // Pausar mirada despreocupada
-  miradaState.activa = false;
+  if (musicaState.activa && musicaState.modo === 'metal') {
+    musicaState.modo = 'normal';
+  }
 
-  // Expresión facial
+  if (miradaState.timer) clearTimeout(miradaState.timer);
+  miradaState.activa   = false;
+  miradaState.currentX = 0;
+  miradaState.currentY = 0;
+  miradaState.bloqueada = true;
+
+  setTimeout(() => {
+    miradaState.bloqueada = false;
+  }, 900);
+
+  removeAllObjetos();
   activarExpresion('angry');
-
-  // Pose corporal con transición suave
-  poseAngry(currentVRM);
+  poseAngry(currentVRM); // poseAngry fija miradaState.targetX/Y
 
   expresionState.actual = 'angry';
   log(`Expresión: angry (${duracionSegundos}s)`);
 
-  // Reset automático
   expresionState.timerReset = setTimeout(() => {
     desactivarAngry();
   }, duracionSegundos * 1000);
@@ -711,16 +750,15 @@ function activarAngry(duracionSegundos = 10) {
 function desactivarAngry() {
   if (!currentVRM) return;
 
-  // Volver expresión facial a neutral
   activarExpresion('neutral');
-
-  // Volver pose corporal a reposo
   poseNeutral(currentVRM);
 
-  // Centrar mirada y reactivar animación
-  miradaState.targetX = 0;
-  miradaState.targetY = 0;
-  miradaState.activa = true;
+  miradaState.targetX  = 0;
+  miradaState.targetY  = 0;
+  miradaState.currentX = 0;
+  miradaState.currentY = 0;
+  miradaState.bloqueada = false;
+  miradaState.activa   = true;
   programarSiguienteMirada();
 
   expresionState.actual = 'neutral';
@@ -761,10 +799,21 @@ function activarSad(duracionSegundos = 15) {
     expresionState.timerReset = null;
   }
 
-  // Mirada ligeramente hacia abajo
-  miradaState.activa = false;
-  miradaState.targetX =  0.15;
-  miradaState.targetY =  0;
+  if (musicaState.activa && musicaState.modo === 'metal') {
+    musicaState.modo = 'normal';
+  }
+
+  if (miradaState.timer) clearTimeout(miradaState.timer);
+  miradaState.activa   = false;
+  miradaState.targetX  = 0.15;  // ligeramente abajo (tristeza)
+  miradaState.targetY  = 0;
+  miradaState.currentX = 0;
+  miradaState.currentY = 0;
+  miradaState.bloqueada = true;
+
+  setTimeout(() => {
+    miradaState.bloqueada = false;
+  }, 900);
 
   activarExpresion('sad');
   poseSad(currentVRM);
@@ -784,13 +833,98 @@ function desactivarSad() {
   activarExpresion('neutral');
   poseNeutral(currentVRM);
 
-  miradaState.targetX = 0;
-  miradaState.targetY = 0;
-  miradaState.activa  = true;
+  miradaState.targetX  = 0;
+  miradaState.targetY  = 0;
+  miradaState.currentX = 0;
+  miradaState.currentY = 0;
+  miradaState.bloqueada = false;
+  miradaState.activa   = true;
   programarSiguienteMirada();
 
   expresionState.actual = 'neutral';
   log('Expresión: neutral (desde sad)');
+}
+
+
+// ── Pose happy ──────────────────────────────────────────────────────────────
+
+/**
+ * Postura alegre y abierta: cabeza levantada y ladeada, brazos ligeramente
+ * separados del cuerpo en actitud receptiva y energética.
+ */
+function poseHappy(vrm) {
+  const lado = Math.random() < 0.5 ? 1 : -1;
+
+  // Cabeza ligeramente levantada y ladeada — actitud alegre y abierta
+  lerpHueso(vrm, 'head', { x: -0.05, y: lado * 0.1,  z: lado * 0.06 });
+  lerpHueso(vrm, 'neck', { x: -0.03, y: lado * 0.05, z: lado * 0.03 });
+
+  // Brazos ligeramente abiertos — postura receptiva y energética
+  lerpHueso(vrm, 'leftUpperArm',  { x:  0.05, y: -0.08, z: -1.0  });
+  lerpHueso(vrm, 'rightUpperArm', { x:  0.05, y:  0.08, z:  1.0  });
+  lerpHueso(vrm, 'leftLowerArm',  { x:  0.1,  y:  0,    z: -0.15 });
+  lerpHueso(vrm, 'rightLowerArm', { x:  0.1,  y:  0,    z:  0.15 });
+  lerpHueso(vrm, 'leftHand',      { x:  0,    y:  0,    z:  0    });
+  lerpHueso(vrm, 'rightHand',     { x:  0,    y:  0,    z:  0    });
+
+  iniciarLerp();
+}
+
+/**
+ * Activa la emoción "happy": expresión facial + pose abierta + auto-reset.
+ * La mirada idle se reactiva tras la transición (avatar alerta y comunicativo).
+ * @param {number} duracionSegundos - Tiempo hasta volver a neutral (default: 30 s).
+ */
+function activarHappy(duracionSegundos = 30) {
+  if (!currentVRM) return;
+
+  if (expresionState.timerReset) {
+    clearTimeout(expresionState.timerReset);
+    expresionState.timerReset = null;
+  }
+
+  // Mirada ligeramente arriba — apertura y energía positiva
+  miradaState.targetX  = -0.05;
+  miradaState.targetY  = 0;
+  miradaState.currentX = 0;
+  miradaState.currentY = 0;
+  miradaState.bloqueada = true;
+
+  // Desbloquear y reactivar mirada idle al terminar el lerp
+  setTimeout(() => {
+    miradaState.bloqueada = false;
+    miradaState.activa    = true;
+    programarSiguienteMirada();
+  }, 900);
+
+  activarExpresion('happy');
+  poseHappy(currentVRM);
+
+  expresionState.actual = 'happy';
+  log(`Expresión: happy (${duracionSegundos}s)`);
+
+  expresionState.timerReset = setTimeout(() => {
+    desactivarHappy();
+  }, duracionSegundos * 1000);
+}
+
+/** Revierte la emoción happy: expresión neutral + pose reposo + reactiva mirada idle. */
+function desactivarHappy() {
+  if (!currentVRM) return;
+
+  activarExpresion('neutral');
+  poseNeutral(currentVRM);
+
+  miradaState.targetX  = 0;
+  miradaState.targetY  = 0;
+  miradaState.currentX = 0;
+  miradaState.currentY = 0;
+  miradaState.bloqueada = false;
+  miradaState.activa   = true;
+  programarSiguienteMirada();
+
+  expresionState.actual = 'neutral';
+  log('Expresión: neutral (desde happy)');
 }
 
 
@@ -970,11 +1104,23 @@ function activarSurprised(duracionSegundos = 5) {
     expresionState.timerReset = null;
   }
 
-  // Mirada ligeramente hacia arriba (acompasa la cabeza echada atrás)
-  miradaState.activa  = false;
-  miradaState.targetX = -0.1;
-  miradaState.targetY =  0;
+  if (musicaState.activa && musicaState.modo === 'metal') {
+    musicaState.modo = 'normal';
+  }
 
+  if (miradaState.timer) clearTimeout(miradaState.timer);
+  miradaState.activa   = false;
+  miradaState.targetX  = -0.1;  // ligeramente arriba (acompasa la cabeza)
+  miradaState.targetY  =  0;
+  miradaState.currentX = 0;
+  miradaState.currentY = 0;
+  miradaState.bloqueada = true;
+
+  setTimeout(() => {
+    miradaState.bloqueada = false;
+  }, 900);
+
+  removeAllObjetos();
   activarExpresion('surprised');
   poseSurprised(currentVRM);
 
@@ -993,9 +1139,12 @@ function desactivarSurprised() {
   activarExpresion('neutral');
   poseNeutral(currentVRM);
 
-  miradaState.targetX = 0;
-  miradaState.targetY = 0;
-  miradaState.activa  = true;
+  miradaState.targetX  = 0;
+  miradaState.targetY  = 0;
+  miradaState.currentX = 0;
+  miradaState.currentY = 0;
+  miradaState.bloqueada = false;
+  miradaState.activa   = true;
   programarSiguienteMirada();
 
   expresionState.actual = 'neutral';
@@ -1592,11 +1741,13 @@ function connectWebSocket() {
 // correspondientes. Estructura del mensaje: { accion, parametros }
 //
 // Acciones disponibles:
-//   emocion_happy / neutral             → expresión simple
+//   emocion_happy                       → expresión + pose + auto-reset (parametros.duracion)
+//   emocion_neutral                     → reset completo a estado base
 //   emocion_angry                       → expresión + pose + auto-reset (parametros.duracion)
 //   emocion_sad                         → expresión + pose + auto-reset (parametros.duracion)
 //   emocion_relaxed                     → expresión + pose + auto-reset (parametros.duracion)
 //   emocion_surprised                   → expresión + pose + auto-reset (parametros.duracion)
+//   emocion_closed                      → expresión + pose + auto-reset (parametros.duracion)
 //   hablar                 → alias de emocion_happy
 //   escuchar               → alias de emocion_neutral
 //   alerta                 → alias de emocion_surprised
@@ -1620,12 +1771,12 @@ function ejecutarComando(comando) {
   switch (accion) {
     case 'hablar':
     case 'emocion_happy':
-      activarExpresion('happy');
+      activarHappy(parametros.duracion ?? 30);
       break;
       
     case 'escuchar':
     case 'emocion_neutral':
-      activarExpresion('neutral');
+      activarNeutral();
       break;
       
     case 'alerta':
@@ -1669,8 +1820,7 @@ function ejecutarComando(comando) {
       break;
       
     case 'reset':
-      activarExpresion('neutral');
-      mirarHacia(0, 0, 0);
+      activarNeutral();
       log('Reset ejecutado');
       break;
 

@@ -18,6 +18,7 @@ Topics MQTT de entrada
 ──────────────────────
   riatla/emocion   →  {"emocion": "angry"}
                       {"emocion": "sad", "duracion": 5}
+                      {"emocion": "dormir"}  ← alias de "closed" (ojos cerrados)
                       "happy"   ← texto plano también aceptado
   riatla/reset     →  cualquier payload → vuelve a neutral
   riatla/world     →  ruta relativa del GLB/GLTF  (ej: "./world/Attic.vnworld")
@@ -69,6 +70,12 @@ TOPIC_HA         = "homeassistant/#"  # para futuras integraciones específicas 
 
 # Deben coincidir exactamente con los case de ejecutarComando() en renderer.js
 EMOCIONES_VALIDAS = {"happy", "angry", "sad", "relaxed", "surprised", "neutral", "closed"}
+
+# Alias MQTT → nombre interno. Permite usar nombres amigables por MQTT
+# sin cambiar los nombres de acciones del renderer.
+ALIASES_EMOCION = {
+    "dormir": "closed",   # MQTT: "dormir" → renderer: emocion_closed
+}
 
 # ── Estado interno ─────────────────────────────────────────────────────────────
 # Compartido entre el hilo MQTT y el hilo WS.
@@ -187,6 +194,7 @@ def set_emocion(emocion: str, duracion: int = None, mqtt_client=None):
         mqtt_client:  Cliente paho para publicar en riatla/estado.
     """
     emocion = emocion.lower().strip()
+    emocion = ALIASES_EMOCION.get(emocion, emocion)  # resolver alias antes de validar
 
     if emocion not in EMOCIONES_VALIDAS:
         print(f"[Riatla] Emoción desconocida: '{emocion}' — válidas: {EMOCIONES_VALIDAS}")

@@ -311,6 +311,10 @@ REGLAS DE COMPORTAMIENTO:
 5. Sé sutil con el avatar — un cambio de contexto = máximo 2-3 acciones de Riatla
 6. Para eficiencia energética actúa siempre que detectes luz encendida sin presencia
 7. El salón puede tener presencia de hurones — no interpretes eso como presencia humana salvo que person.kevin o person.sandra estén home
+8. AISLAMIENTO DE HABITACIONES: un cambio en una habitación NO justifica tocar dispositivos de otras habitaciones. Si el MOTIVO es salón, actúa solo en salón.
+9. NUNCA apagues la luz de una habitación donde la sección RELACIÓN PRESENCIA↔LUZ indica presencia=on.
+10. Antes de emitir cualquier turn_off de una luz, comprueba en RELACIÓN PRESENCIA↔LUZ que esa habitación tiene presencia=off. Si hay presencia, omite la acción.
+11. El proyector se ve desde el sofa y a oscuras. Si detectas presencia en el sofá durante un tiempo, puedes encender el proyector, pero NUNCA si no hay presencia en el sofá.
 
 ESTRUCTURA DE RESPUESTA (JSON estricto):
 {{
@@ -660,48 +664,119 @@ def llm_completar(mensajes: list) -> str:
 def construir_prompt_usuario(motivo: str) -> str:
     ahora = datetime.now()
     with _lock:
-        ctx  = {k: v["valor"] for k, v in contexto_ha.items()}
-        hist = list(historial_ha)[-10:]  # subir a 10 para más contexto
+        ctx  = dict(contexto_ha)
+        hist = list(historial_ha)[-15:]
 
-    # Calcular tiempo sin presencia para cada habitación
-    presencia_info = {}
-    mapeo = {
-        "binary_sensor.grupopresenciadormitorio":   "dormitorio",
-        "binary_sensor.grupopresenciasalon":        "salon",
-        "binary_sensor.grupopresenciacocina":       "cocina",
-        "binary_sensor.grupopresenciaestudiokevin": "estudio",
-        "binary_sensor.presencia_salon_presence_sensor_2" : "sofa_salon",
-        "binary_sensor.presencia_salon_presence_sensor_3" : "mesa_salon",
+    def val(eid):
+        return ctx.get(eid, {}).get("valor", "unknown")
+
+    def minutos_desde(sensor_id):
+        datos = ctx.get(sensor_id, {})
+        ts = datos.get("ts")
+        if not ts:
+            return "?"
+        try:
+            ts_dt = datetime.strptime(ts, "%H:%M:%S").replace(
+                year=ahora.year, month=ahora.month, day=ahora.day
+            )
+            return f"{int((ahora - ts_dt).total_seconds() / 60)} min"
+        except:
+            return "?"
+
+    # ── Presencia por habitación ──────────────────────────────────────────
+    presencias = {
+        "estudio":    val("binary_sensor.grupopresenciaestudiokevin"),
+        "salon":      val("binary_sensor.grupopresenciasalon"),
+        "cocina":     val("binary_sensor.grupopresenciacocina"),
+        "dormitorio": val("binary_sensor.grupopresenciadormitorio"),
     }
-    for sensor, nombre in mapeo.items():
-        datos = contexto_ha.get(sensor, {})
-        valor = datos.get("valor", "unknown")
-        ts    = datos.get("ts", None)
-        if ts and valor == "off":
-            try:
-                ts_dt    = datetime.strptime(ts, "%H:%M:%S").replace(
-                    year=ahora.year, month=ahora.month, day=ahora.day
-                )
-                minutos  = int((ahora - ts_dt).total_seconds() / 60)
-                presencia_info[nombre] = f"sin presencia hace {minutos} min"
-            except:
-                presencia_info[nombre] = f"sin presencia (tiempo desconocido)"
-        elif valor == "on":
-            presencia_info[nombre] = "con presencia"
+    sofa_salon = val("binary_sensor.presencia_salon_presence_sensor_2")
+    mesa_salon = val("binary_sensor.presencia_salon_presence_sensor_3")
+
+    # ── Luces ────────────────────────────────────────────────────────────
+    luces = {
+        "light.estudio":        val("light.estudio"),
+        "light.salon":          val("light.salon"),
+        "light.habitacion":     val("light.habitacion"),
+        "light.luz_entrada_luz":val("light.luz_entrada_luz"),
+    }
+
+    # ── Tiempo sin presencia ─────────────────────────────────────────────
+    sensor_map = {
+        "estudio":    "binary_sensor.grupopresenciaestudiokevin",
+        "salon":      "binary_sensor.grupopresenciasalon",
+        "cocina":     "binary_sensor.grupopresenciacocina",
+        "dormitorio": "binary_sensor.grupopresenciadormitorio",
+    }
+    hab_con_presencia = [h for h, v in presencias.items() if v == "on"]
+    hab_sin_presencia = [
+        f"{h} (hace {minutos_desde(sensor_map[h])})"
+        for h, v in presencias.items() if v == "off"
+    ]
+
+    # ── Relación presencia ↔ luz (la más importante para evitar errores) ─
+    rel_lines = []
+    for hab, sensor, luz in [
+        ("estudio",    "binary_sensor.grupopresenciaestudiokevin", "light.estudio"),
+        ("salon",      "binary_sensor.grupopresenciasalon",        "light.salon"),
+        ("dormitorio", "binary_sensor.grupopresenciadormitorio",   "light.habitacion"),
+    ]:
+        pres = val(sensor)
+        luz_v = val(luz)
+        # Detectar a inconsistencia (luz on sin presencia) para informar al LLM
+        inconsistencia = ""
+        if pres == "off" and luz_v == "on":
+            inconsistencia = f" ← LUZ ENCENDIDA SIN PRESENCIA hace {minutos_desde(sensor)}"
+        elif pres == "on" and luz_v == "off":
+            inconsistencia = " ← LUZ APAGADA CON PRESENCIA"
+        rel_lines.append(f"  {hab:12}: presencia={pres:7}  luz={luz_v:7}{inconsistencia}")
+
+    # ── Historial legible ────────────────────────────────────────────────
+    hist_legible = [
+        f"  [{e['ts']}] {e['entity_id']}: {e['anterior']} → {e['valor']}"
+        for e in hist
+    ]
+
+    luces_on  = [e for e, v in luces.items() if v == "on"]
+    luces_off = [e for e, v in luces.items() if v == "off"]
 
     return f"""
 MOTIVO: {motivo}
 HORA: {ahora.strftime("%A %d/%m/%Y %H:%M")}
 
-ESTADO ACTUAL DEL HOGAR:
-{json.dumps(ctx, ensure_ascii=False, indent=2)}
+═══ PERSONAS ════════════════════════════════════
+  Kevin:  {val('person.kevin')}
+  Sandra: {val('person.sandra')}
 
-TIEMPO SIN PRESENCIA POR HABITACIÓN:
-{json.dumps(presencia_info, ensure_ascii=False, indent=2)}
+═══ PRESENCIA POR HABITACIÓN ════════════════════
+  Con presencia AHORA: {', '.join(hab_con_presencia) if hab_con_presencia else '(ninguna)'}
+  Sin presencia:       {', '.join(hab_sin_presencia) if hab_sin_presencia else '(ninguna)'}
+  Salón detalle:
+    sensor_general: {presencias['salon']}  |  sofá: {sofa_salon}  |  mesa: {mesa_salon}
 
-ÚLTIMOS EVENTOS:
-{json.dumps(hist, ensure_ascii=False)}
+═══ RELACIÓN PRESENCIA ↔ LUZ (verificar ANTES de apagar) ══
+{chr(10).join(rel_lines)}
 
+═══ ESTADO LUCES ════════════════════════════════
+  Encendidas: {', '.join(luces_on)  if luces_on  else '(ninguna)'}
+  Apagadas:   {', '.join(luces_off) if luces_off else '(ninguna)'}
+
+═══ OTROS ESTADOS ═══════════════════════════════
+  Media estudio: {val('media_player.havoice_estudio_media_player_2')}
+  Proyector:     {val('switch.socket_proyector_switch')}
+  Alarma:        {val('alarm_control_panel.alarmo')}
+  Puerta:        {val('binary_sensor.puerta_entrada_contact')}
+  Humo:          {val('binary_sensor.sensor_humo_smoke')}
+  Inundación:    {val('binary_sensor.sensor_inundacion_cocina_water_leak')}
+
+═══ ÚLTIMOS EVENTOS (cronológico) ══════════════
+{chr(10).join(hist_legible) if hist_legible else '  (sin eventos)'}
+
+RECUERDA — antes de generar acciones:
+→ Solo actúa sobre la habitación/entidad indicada en el MOTIVO.
+→ NUNCA apagues un dispositivo de una habitación que NO aparece en el MOTIVO.
+→ Si presencia=on en RELACIÓN PRESENCIA↔LUZ, NO emitas turn_off para esa habitación bajo ningún concepto.
+→ Si el cambio es "salon sin presencia", afecta solo a light.salon y switch.socket_proyector_switch. NO toques light.estudio, light.habitacion ni otros.
 ¿Qué debe hacer Riatla ahora?
 """
 
@@ -720,7 +795,8 @@ def tomar_decision(motivo: str):
     try:
         mensajes = [{"role": "system", "content": SYSTEM_PROMPT}]
         with _lock:
-            mensajes.extend(list(historial_conv))
+            # Solo los últimos 3 pares (6 mensajes) para evitar contexto obsoleto
+            mensajes.extend(list(historial_conv)[-6:])
         prompt = construir_prompt_usuario(motivo)
         mensajes.append({"role": "user", "content": prompt})
 
