@@ -53,6 +53,9 @@ INTERVALO_REVISION = 2
 MAX_HISTORIAL_HA   = 50
 MAX_HISTORIAL_CONV = 20
 
+TOPIC_CONFIRMAR      = "riatla/confirmar"  # payload: "si" | "no"
+TIMEOUT_CONFIRMACION = 30                  # segundos antes de descartar auto
+
 # ── Control de cambios ─────────────────────────────────────────────────────────
 
 _ultimo_snapshot    = {}   # contexto en la última revisión periódica
@@ -315,6 +318,7 @@ REGLAS DE COMPORTAMIENTO:
 9. NUNCA apagues la luz de una habitación donde la sección RELACIÓN PRESENCIA↔LUZ indica presencia=on.
 10. Antes de emitir cualquier turn_off de una luz, comprueba en RELACIÓN PRESENCIA↔LUZ que esa habitación tiene presencia=off. Si hay presencia, omite la acción.
 11. El proyector se ve desde el sofa y a oscuras. Si detectas presencia en el sofá durante un tiempo, puedes encender el proyector, pero NUNCA si no hay presencia en el sofá.
+12. ACCIONES INTRUSIVAS: poner música (media_player media_play/play_media), encender el proyector (switch.socket_proyector_switch turn_on) y activar el baile de Riatla (world/musica on) son intrusivas. Inclúyelas en "acciones" con normalidad — el sistema las interceptará automáticamente para pedir confirmación al usuario antes de ejecutarlas.
 
 ESTRUCTURA DE RESPUESTA (JSON estricto):
 {{
@@ -822,6 +826,166 @@ def tomar_decision(motivo: str):
     finally:
         _decision_en_curso.clear()  # siempre liberar aunque haya error
 
+# ── Confirmación de acciones intrusivas ───────────────────────────────────────
+# Acciones "intrusivas": impactan activamente en el entorno físico.
+# Flujo:
+#   1. El LLM emite la acción con normalidad en JSON.
+#   2. ejecutar_accion() la intercepta → llama solicitar_confirmacion().
+#   3. Se crea notificación persistente en HA + anuncio por voz.
+#   4. El usuario responde → topic riatla/confirmar (payload: "si" | "no").
+#   5. "si" ejecuta | cualquier otro / timeout descarta silenciosamente.
+#
+# Automatización HA recomendada para respuesta vocal (HA Assist):
+#   trigger:  {platform: conversation, command: "(sí|si|confirmar|dale|adelante)"}
+#   action:   {service: mqtt.publish, data: {topic: riatla/confirmar, payload: "si"}}
+
+ACCIONES_INTRUSIVAS_CHECK = [
+    # Música en el estudio
+    lambda a: (
+        a.get("tipo") == "ha"
+        and a.get("dominio") == "media_player"
+        and a.get("servicio") in ("media_play", "play_media", "media_next_track")
+    ),
+    # Proyector del salón
+    lambda a: (
+        a.get("tipo") == "ha"
+        and a.get("dominio") == "switch"
+        and a.get("servicio") == "turn_on"
+        and "proyector" in str(a.get("datos", {}).get("entity_id", ""))
+    ),
+    # Baile de Riatla
+    lambda a: (
+        a.get("tipo") == "riatla"
+        and a.get("topic") == "world/musica"
+        and a.get("datos", {}).get("estado") == "on"
+    ),
+]
+
+_confirm_lock     = threading.Lock()
+_accion_pendiente = {"accion": None, "pregunta": ""}
+_timer_confirm    = [None]   # lista para permitir mutación en closure
+
+
+def es_accion_intrusiva(accion: dict) -> bool:
+    return any(check(accion) for check in ACCIONES_INTRUSIVAS_CHECK)
+
+
+def _describir_accion(accion: dict) -> str:
+    if accion.get("tipo") == "ha":
+        dominio = accion.get("dominio", "")
+        entity  = accion.get("datos", {}).get("entity_id", "")
+        if dominio == "media_player":
+            return "¿Quieres que ponga música en el estudio?"
+        if "proyector" in entity:
+            return "¿Quieres que encienda el proyector del salón?"
+    if accion.get("tipo") == "riatla" and accion.get("topic") == "world/musica":
+        modo = accion.get("datos", {}).get("modo", "normal")
+        return f"¿Quieres que Riatla empiece a bailar? (modo {modo})"
+    return f"¿Confirmas la acción: {accion.get('topic') or accion.get('servicio', '')}?"
+
+
+def _limpiar_pendiente():
+    """Borra el estado de confirmación y cancela el timeout."""
+    with _confirm_lock:
+        _accion_pendiente["accion"]   = None
+        _accion_pendiente["pregunta"] = ""
+        if _timer_confirm[0]:
+            _timer_confirm[0].cancel()
+            _timer_confirm[0] = None
+    ha_llamar_servicio("persistent_notification", "dismiss",
+                       {"notification_id": "riatla_confirm"})
+
+
+def solicitar_confirmacion(accion: dict):
+    """
+    Intercepta una acción intrusiva y pide confirmación:
+      1. Notificación persistente en el panel de HA.
+      2. Anuncio por voz (assist_satellite → tts.cloud_say → tts.speak).
+      3. Espera payload 'si' en TOPIC_CONFIRMAR durante TIMEOUT_CONFIRMACION s.
+    """
+    pregunta = _describir_accion(accion)
+
+    with _confirm_lock:
+        if _accion_pendiente["accion"]:
+            print("[Confirmación] Reemplazando solicitud anterior")
+        _accion_pendiente["accion"]   = accion
+        _accion_pendiente["pregunta"] = pregunta
+        if _timer_confirm[0]:
+            _timer_confirm[0].cancel()
+        t = threading.Timer(TIMEOUT_CONFIRMACION, _on_timeout_confirm)
+        t.daemon = True
+        t.start()
+        _timer_confirm[0] = t
+
+    print(f"[Confirmación] Esperando respuesta ({TIMEOUT_CONFIRMACION}s): {pregunta}")
+
+    ha_llamar_servicio("persistent_notification", "create", {
+        "title":           "Riatla — ¿hacemos esto?",
+        "message":         f"{pregunta}\n\nDi **sí** al asistente, o publica en `riatla/confirmar` → `si`",
+        "notification_id": "riatla_confirm"
+    })
+
+    _anunciar_asistente(pregunta)
+
+
+def _anunciar_asistente(texto: str):
+    """
+    Anuncia texto por voz. Prueba en orden:
+      A) assist_satellite.announce  (HA Voice PE — ajustar entity_id al dispositivo real)
+      B) tts.cloud_say               (Nabu Casa)
+      C) tts.speak                   (TTS genérico)
+    """
+    if ha_llamar_servicio("assist_satellite", "announce", {
+        "entity_id": "assist_satellite.havoice_estudio_satelite_assist",   # ← ajustar al entity_id real
+        "message":   texto
+    }):
+        return
+
+    if ha_llamar_servicio("tts", "cloud_say", {
+        "entity_id": "media_player.havoice_estudio_media_player_2",
+        "message":   texto,
+        "language":  "es-ES"
+    }):
+        return
+
+    ha_llamar_servicio("tts", "speak", {
+        "media_player_entity_id": "media_player.havoice_estudio_media_player_2",
+        "message":  texto,
+        "language": "es-ES"
+    })
+
+
+def _on_timeout_confirm():
+    if _accion_pendiente["accion"]:
+        print(f"[Confirmación] Timeout — descartado: {_accion_pendiente['pregunta']}")
+    _limpiar_pendiente()
+
+
+def on_confirmar_mqtt(client, userdata, msg):
+    """
+    Callback MQTT para riatla/confirmar.
+    Payload 'si' | 'sí' | 'yes' | 'ok'  →  ejecuta la acción pendiente.
+    Cualquier otro valor                 →  cancela silenciosamente.
+    """
+    respuesta = msg.payload.decode("utf-8").strip().lower()
+    print(f"[Confirmación] Respuesta recibida: '{respuesta}'")
+
+    with _confirm_lock:
+        accion = _accion_pendiente.get("accion")
+
+    _limpiar_pendiente()
+
+    if not accion:
+        print("[Confirmación] Sin acción pendiente")
+        return
+
+    if respuesta in ("si", "sí", "yes", "ok", "s", "1"):
+        print("[Confirmación] ✓ Confirmado — ejecutando")
+        ejecutar_accion(accion, _skip_intrusivo=True)
+    else:
+        print("[Confirmación] ✗ Cancelado")
+
+
 # ── Cooldown — evitar repetir acciones ────────────────────────────────────────
 
 COOLDOWN_SEGUNDOS = 120  # mínimo tiempo entre la misma acción
@@ -837,7 +1001,12 @@ def accion_en_cooldown(topic: str, valor: str) -> bool:
     _ultima_accion[clave] = ahora
     return False
 
-def ejecutar_accion(accion: dict):
+def ejecutar_accion(accion: dict, _skip_intrusivo: bool = False):
+    # Interceptar acciones intrusivas para pedir confirmación al usuario
+    if not _skip_intrusivo and es_accion_intrusiva(accion):
+        solicitar_confirmacion(accion)
+        return
+
     tipo = accion.get("tipo", "")
 
     if tipo == "riatla":
@@ -868,17 +1037,27 @@ def riatla_enviar(topic_sufijo: str, payload: dict):
     _mqtt_client.publish(topic, mensaje)
     print(f"[Riatla] → {topic}: {mensaje}")
 
-# ── MQTT (solo para enviar a Riatla) ──────────────────────────────────────────
+# ── MQTT (solo para enviar a Riatla + escuchar confirmaciones) ─────────────────
+
+def _on_mqtt_connect(client, userdata, flags, rc):
+    if rc == 0:
+        print("[MQTT] Conectado")
+        client.subscribe(TOPIC_CONFIRMAR)
+        print(f"[MQTT] Suscrito a {TOPIC_CONFIRMAR}")
+    else:
+        print(f"[MQTT] Error conexión: {rc}")
+
 
 def iniciar_mqtt():
     global _mqtt_client
     client = mqtt.Client()
     client.username_pw_set(MQTT_USER, MQTT_PASS)
-    client.on_connect    = lambda c, u, f, rc: print(f"[MQTT] {'Conectado' if rc==0 else f'Error {rc}'}")
+    client.on_connect    = _on_mqtt_connect
     client.on_disconnect = lambda c, u, rc: print(f"[MQTT] Desconectado")
+    client.message_callback_add(TOPIC_CONFIRMAR, on_confirmar_mqtt)
     client.reconnect_delay_set(min_delay=1, max_delay=30)
     client.connect(MQTT_HOST, MQTT_PORT, keepalive=60)
-    client.loop_start()   # hilo no bloqueante — solo necesitamos publicar
+    client.loop_start()
     _mqtt_client = client
 
 # ── Revisión periódica ─────────────────────────────────────────────────────────
