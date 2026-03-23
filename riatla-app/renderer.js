@@ -338,7 +338,7 @@ function addObjeto(nombre) {
   }
 
   // Si ya existe, quitarlo primero
-  if (objetosActivos[nombre]) removeObjeto(nombre);
+  removeAllObjetos();
 
   const loader = new GLTFLoader();
   loader.load(
@@ -1921,10 +1921,10 @@ function ejecutarComando(comando) {
 
     case 'objeto': {
       const { nombre, accion: accionObj = 'add' } = parametros;
+      if (accionObj === 'clear') { removeAllObjetos(); break; }
       if (!nombre) break;
       if (accionObj === 'remove') removeObjeto(nombre);
-      else if (accionObj === 'clear') removeAllObjetos();
-      else addObjeto(nombre);
+      else addObjeto(nombre); // addObjeto ya llama removeAllObjetos() internamente
       break;
     }
 

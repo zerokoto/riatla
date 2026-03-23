@@ -697,3 +697,15 @@
 [2026-03-23T09:42:31.832Z] BrowserWindow creado
 [2026-03-23T09:42:31.833Z] Intentando cargar: C:\Users\34685\Documents\Proyecto Riatla\riatla\riatla-app\index.html
 [2026-03-23T09:42:31.854Z] DevTools abierto
+[2026-03-23T09:56:07.635Z] Ventana cerrada
+[2026-03-23T09:56:07.637Z] Todas las ventanas cerradas
+[2026-03-23T09:56:07.638Z] APP QUIT
+[2026-03-23T09:56:17.779Z] === ELECTRON INICIANDO ===
+[2026-03-23T09:56:17.781Z] __dirname: C:\Users\34685\Documents\Proyecto Riatla\riatla\riatla-app
+[2026-03-23T09:56:17.781Z] Esperando app.on(ready)...
+[2026-03-23T09:56:17.782Z] Script completamente cargado
+[2026-03-23T09:56:17.838Z] APP READY EVENT RECIBIDO
+[2026-03-23T09:56:17.838Z] Creando BrowserWindow...
+[2026-03-23T09:56:17.971Z] BrowserWindow creado
+[2026-03-23T09:56:17.972Z] Intentando cargar: C:\Users\34685\Documents\Proyecto Riatla\riatla\riatla-app\index.html
+[2026-03-23T09:56:17.991Z] DevTools abierto

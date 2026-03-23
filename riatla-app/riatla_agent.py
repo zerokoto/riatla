@@ -1022,7 +1022,7 @@ _riatla_emocion_actual      = ["neutral"]    # emoción actual conocida de Riatl
 
 ACTIVIDADES_IDLE = [
     ("libro",  {"objeto": "libro",  "accion": "add"}),
-    ("comida", {"objeto": "comida", "accion": "add"}),
+    ("mando",  {"objeto": "mando",  "accion": "add"}),
     ("bebida", {"objeto": "bebida", "accion": "add"}),
 ]
 
