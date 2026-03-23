@@ -314,11 +314,20 @@ def on_message(client, userdata, msg):
         try:
             data = json.loads(payload_raw)
             nombre  = data.get("objeto", "")
-            accion  = data.get("accion", "add")  # add | remove | clear
+            accion  = data.get("accion", "add")  # add | remove | clear | update
         except json.JSONDecodeError:
             nombre = payload_raw
             accion = "add"
-        enviar_comando("objeto", {"nombre": nombre, "accion": accion})
+            data   = {}
+        if accion == "update":
+            enviar_comando("update_objeto", {
+                "nombre":   nombre,
+                "position": data.get("position"),
+                "rotation": data.get("rotation"),
+                "scale":    data.get("scale"),
+            })
+        else:
+            enviar_comando("objeto", {"nombre": nombre, "accion": accion})
         print(f"[Riatla] Objeto → {accion}: {nombre}")
 
     if topic == TOPIC_HUESO:

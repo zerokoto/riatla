@@ -319,9 +319,9 @@ const OBJECTS = {
   },
   mando: {
     path:     './props/controller.glb',
-    scale:    0.2,
-    position: { x: 0.135, y: 1.13, z: 0.3 },  // delante del avatar, a su altura
-    rotation: { x: 0,   y: Math.PI+Math.PI/8,   z: 0 }  // rotación para que quede abierto y legible
+    scale:    0.2000,
+    position: { x: 0.1470, y: 1.1300, z: 0.3360 },
+    rotation: { x: 0.0000, y: -2.7030, z: 0.0000 }
   }
 
 };
@@ -1931,6 +1931,25 @@ function ejecutarComando(comando) {
     case 'hueso': {
       const { huesos = [], duracion = 800, lerp = true } = parametros;
       if (huesos.length > 0) moverHuesos(huesos, duracion, lerp);
+      break;
+    }
+
+    case 'update_objeto': {
+      const { nombre, position, rotation, scale } = parametros;
+      // Actualizar config (para que animarObjetos use los nuevos valores base)
+      const cfg = OBJECTS[nombre];
+      if (cfg) {
+        if (position) cfg.position = position;
+        if (rotation) cfg.rotation = rotation;
+        if (scale !== undefined && scale !== null) cfg.scale = scale;
+      }
+      // Aplicar inmediatamente al objeto vivo en escena
+      const obj = objetosActivos[nombre];
+      if (obj) {
+        if (position) obj.position.set(position.x, position.y, position.z);
+        if (rotation) obj.rotation.set(rotation.x, rotation.y, rotation.z);
+        if (scale !== undefined && scale !== null) obj.scale.setScalar(scale);
+      }
       break;
     }
       
